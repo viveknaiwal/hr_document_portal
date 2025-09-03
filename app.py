@@ -204,7 +204,7 @@ def init_db():
         )
         con.commit()
 
-    # Safe migrations for old DBs (if they existed before these fields)
+    # Safe migrations (for existing DBs missing columns)
     for stmt in [
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
@@ -293,8 +293,14 @@ def make_zip(refs: list) -> bytes:
                     zf.writestr(to_display_name(ref), data)
     return buf.getvalue()
 
+# Helper: robust "days to expiry" (fixes .dt.date issue)
+def _days_to_expiry(end_series):
+    end_dt = pd.to_datetime(end_series, errors="coerce")        # datetime64[ns]
+    today_ts = pd.Timestamp(dt.date.today())                    # midnight today
+    return (end_dt - today_ts).dt.days                          # Int64 (NaN where invalid)
+
 # ===================================================================
-#                               SERVE MODE
+#                               SERVE MODE (with VIEW audit)
 # ===================================================================
 if "serve" in st.query_params:
     token = st.query_params["serve"]
@@ -409,10 +415,10 @@ def versions_with_links(con, versions_df):
 def page_documents(con, user):
     st.subheader("Browse Documents")
 
-    # Pull documents
+    # Base documents
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
 
-    # Pull contracts and align columns so we can merge (contracts appear by default)
+    # Contracts (shown by default)
     c = pd.read_sql(
         """SELECT id, 'Contract' AS doc_type, name,
                   start_date AS created_date, upload_date,
@@ -577,9 +583,8 @@ def page_contracts(con, user):
     if df.empty:
         st.info("No contracts yet."); return
 
-    today = dt.date.today()
-    end_dt = pd.to_datetime(df["end_date"], errors="coerce")
-    df["days_to_expiry"] = (end_dt.dt.date - today).dt.days
+    # Robust days-to-expiry (fix for AttributeError)
+    df["days_to_expiry"] = _days_to_expiry(df["end_date"])
 
     c1, c2, c3, c4 = st.columns(4)
     with c1: v_q = st.text_input("Search vendor")
@@ -591,7 +596,8 @@ def page_contracts(con, user):
     if v_q: f = f[f["vendor"].str.contains(v_q, case=False, na=False)]
     if o_q: f = f[f["owner"].str.contains(o_q, case=False, na=False)]
     if s_q != "All": f = f[f["status"] == s_q]
-    if exp_days != "All": f = f[(f["days_to_expiry"] >= 0) & (f["days_to_expiry"] <= int(exp_days))]
+    if exp_days != "All":
+        f = f[(f["days_to_expiry"] >= 0) & (f["days_to_expiry"] <= int(exp_days))]
 
     if f.empty:
         st.info("No matching contracts"); return
@@ -708,7 +714,7 @@ def main():
             with t[tabs.index("Manage Users")]:
                 page_manage_users(con, user)
 
-# ---------------- existing Manage Users & Audit ----------------
+# ---------------- Manage Users & Audit ----------------
 def page_audit(con, user=None):
     st.subheader("Audit Log")
     df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
