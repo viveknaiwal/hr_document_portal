@@ -186,7 +186,7 @@ def ref_exists(ref: str) -> bool:
 # ===================================================================
 #                                DB
 # ===================================================================
-def _hash(pw): 
+def _hash(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def init_db():
@@ -276,13 +276,16 @@ def init_db():
         )
         con.commit()
 
+    # non-breaking schema adds (safe if already exist)
     for stmt in [
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN renewal_notice_days INTEGER",
     ]:
-        try: cur.execute(stmt)
-        except sqlite3.OperationalError: pass
+        try:
+            cur.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
 
     con.commit()
     return con
@@ -326,7 +329,7 @@ def validate_auth_token(con, token) -> dict | None:
         return None
     cur = con.execute("SELECT role FROM users WHERE email=?", (email,))
     row = cur.fetchone()
-    if not row: 
+    if not row:
         return None
     return {"username": email, "role": row[0]}
 
@@ -337,37 +340,41 @@ def delete_auth_token(con, token):
 # ===================================================================
 #                        APP HELPERS
 # ===================================================================
-def sha256_bytes(b): 
+def sha256_bytes(b):
     h = hashlib.sha256(); h.update(b); return h.hexdigest()
 
-def gen_token(): 
+def gen_token():
     return secrets.token_urlsafe(16)
 
 def ensure_tokens(con, row_id, email_exists):
     cur = con.execute("SELECT file_token,email_token FROM documents WHERE id=?", (row_id,))
     row = cur.fetchone()
-    if not row: return None, None
+    if not row:
+        return None, None
     ft, et = row
+    changed = False
     if not ft:
-        ft = gen_token()
+        ft = gen_token(); changed = True
         con.execute("UPDATE documents SET file_token=? WHERE id=?", (ft, row_id))
     if email_exists and not et:
-        et = gen_token()
+        et = gen_token(); changed = True
         con.execute("UPDATE documents SET email_token=? WHERE id=?", (et, row_id))
-    con.commit(); backup_db_to_dropbox()
+    if changed:
+        con.commit(); backup_db_to_dropbox()
     return ft, et
 
 def ensure_tokens_generic(con, table, row_id, email_exists):
     cur = con.execute(f"SELECT file_token,email_token FROM {table} WHERE id=?", (row_id,))
     row = cur.fetchone()
-    if not row: return None, None
+    if not row:
+        return None, None
     ft, et = row; changed = False
     if not ft:
-        ft = gen_token()
-        con.execute(f"UPDATE {table} SET file_token=? WHERE id=?", (ft, row_id)); changed = True
+        ft = gen_token(); changed = True
+        con.execute(f"UPDATE {table} SET file_token=? WHERE id=?", (ft, row_id))
     if email_exists and not et:
-        et = gen_token()
-        con.execute(f"UPDATE {table} SET email_token=? WHERE id=?", (et, row_id)); changed = True
+        et = gen_token(); changed = True
+        con.execute(f"UPDATE {table} SET email_token=? WHERE id=?", (et, row_id))
     if changed:
         con.commit(); backup_db_to_dropbox()
     return ft, et
@@ -469,7 +476,7 @@ def page_upload(con, user):
 
     if ok:
         if not name or not doc or not remarks.strip():
-            st.error("Please provide Name, Key Document, and Remarks / Context."); 
+            st.error("Please provide Name, Key Document, and Remarks / Context.")
             return
 
         data = doc.read()
@@ -715,7 +722,7 @@ def page_contracts(con, user):
         use_container_width=True
     )
 
-    st.markdown("### Open a contract group")
+    st.markdown("### Contract versions")
     groups = f.drop_duplicates(subset=["vendor","name"])
     labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
     if labels:
@@ -724,7 +731,12 @@ def page_contracts(con, user):
             sel_group = groups.iloc[labels.index(pick)]
             versions = f[(f["vendor"] == sel_group["vendor"]) & (f["name"] == sel_group["name"])]\
                 .sort_values("version", ascending=False)
-            v_table = versions_with_links_contracts(con, versions)
+            # fetch raw rows for refs
+            raw_versions = pd.read_sql(
+                "SELECT * FROM contracts WHERE vendor=? AND name=? AND is_deleted=0 ORDER BY version DESC",
+                con, params=(sel_group["vendor"], sel_group["name"])
+            )
+            v_table = versions_with_links_contracts(con, raw_versions)
             v_show = v_table[["version","upload_date","uploaded_by","status",
                               "start_date","end_date","remarks","View (doc)","View (email)"]]
             st.data_editor(
@@ -825,7 +837,7 @@ def main():
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
 
-    # ---------- Auto-login via ?auth= token (use ONLY st.query_params) ----------
+    # ---------- Auto-login via ?auth= token ----------
     token_param = st.query_params.get("auth", None)
     if not st.session_state.get("user") and token_param:
         user_from_token = validate_auth_token(con, token_param)
@@ -842,7 +854,7 @@ def main():
                 insert_audit(con, u, "LOGIN")
                 if keep:
                     tok = new_auth_token(con, auth["username"], days=30)
-                    st.query_params["auth"] = tok   # set with new API
+                    st.query_params["auth"] = tok
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -853,47 +865,42 @@ def main():
             tok = st.query_params.get("auth", None)
             if tok: delete_auth_token(con, tok)
             if "auth" in st.query_params:
-                del st.query_params["auth"]   # remove with new API
+                del st.query_params["auth"]
             insert_audit(con, user["username"], "LOGOUT")
             st.session_state.pop("user")
             st.rerun()
 
+        # Tabs for navigation
         tabs = ["Documents", "Upload", "Contracts"]
         if user["role"] == "viewer":
             tabs = ["Documents", "Contracts"]
         if user["role"] == "admin":
             tabs += ["Deleted", "Audit", "Manage Users"]
-        if user["role"] == "admin":
-            tabs += ["Deleted", "Audit", "Manage Users"]
 
-       # make tabs blue (active + hover)
-st.markdown("""
-<style>
-/* active underline */
-.stTabs [data-baseweb="tab-highlight"] {
-  background-color: #2563EB !important;
-}
-/* active tab text */
-.stTabs [role="tab"][aria-selected="true"] p {
-  color: #2563EB !important;
-}
-/* hover color for inactive tabs */
-.stTabs [role="tab"]:not([aria-selected="true"]) p { 
-  transition: color .15s ease;
-}
-.stTabs [role="tab"]:not([aria-selected="true"]):hover p,
-.stTabs [role="tab"]:not([aria-selected="true"]):focus p {
-  color: #2563EB !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-t = st.tabs(tabs)
-
-
-        
+        # 🔵 Make tabs blue (active + hover)
+        st.markdown("""
+        <style>
+        /* active underline */
+        .stTabs [data-baseweb="tab-highlight"] {
+          background-color: #2563EB !important;
+        }
+        /* active tab text */
+        .stTabs [role="tab"][aria-selected="true"] p {
+          color: #2563EB !important;
+        }
+        /* hover color for inactive tabs */
+        .stTabs [role="tab"]:not([aria-selected="true"]) p { 
+          transition: color .15s ease;
+        }
+        .stTabs [role="tab"]:not([aria-selected="true"]):hover p,
+        .stTabs [role="tab"]:not([aria-selected="true"]):focus p {
+          color: #2563EB !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
         t = st.tabs(tabs)
+
         with t[0]:
             page_documents(con, user)
         if "Upload" in tabs:
