@@ -2,7 +2,7 @@
 # ------------------------------------------------------------------
 # HR Document Portal — Streamlit + Dropbox/local persistence
 # Admin-managed users + mandatory remarks + full audit logging
-# Polished UI (blue/white), header bar, styled tabs/buttons/cards
+# Minimal blue/white UI (underlined tabs, light buttons, narrow width)
 # ------------------------------------------------------------------
 
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
@@ -13,7 +13,7 @@ import streamlit as st
 
 # ------------- Branding / Title
 APP_TITLE = "HR Document Portal"
-UPLOAD_TAB = "Documents Upload"   # UI label (safe rename)
+UPLOAD_TAB = "Documents Upload"   # UI label only
 
 # ------------- Local fallback storage
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
@@ -25,89 +25,79 @@ LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 #                         LIGHTWEIGHT DESIGN
 # ===================================================================
 def inject_css():
-    st.markdown("""
+    # brand blue used throughout
+    brand = "#0B5FFF"  # crisp blue
+    st.markdown(f"""
     <style>
-      .block-container { padding-top: 1.0rem; }
+      /* app width + spacing */
+      .block-container {{ max-width: 1100px; padding-top: 1rem; }}
 
-      /* Tabs */
-      .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-      .stTabs [data-baseweb="tab"] {
-        background: #F2F6FF;
-        color: #0B2545;
-        border-radius: 10px 10px 0 0;
-        padding: 8px 14px;
-        font-weight: 600;
-        border: 1px solid #E5EDFF;
-        border-bottom: 2px solid transparent;
-      }
-      .stTabs [aria-selected="true"] {
-        background: #FFFFFF !important;
-        color: #0056B3 !important;
-        border-bottom: 2px solid #FF4B4B;
-      }
+      /* header */
+      .hr-topbar {{
+        display:flex; align-items:center; gap:14px; margin: 0 0 8px 0;
+      }}
+      .hr-title {{
+        font-weight: 800; letter-spacing:.2px; color:#0B2545; margin:0;
+      }}
+      .hr-subtle {{ color:#64748B; font-size:12px; }}
 
-      /* Buttons */
-      .stButton>button {
-        background:#0056B3; color:#fff; border:0; border-radius:10px;
-        padding:10px 16px; font-weight:600;
-      }
-      .stButton>button:hover { filter:brightness(0.95); }
+      /* underlined tabs (flat) */
+      .stTabs [data-baseweb="tab-list"] {{ gap: 22px; border-bottom:1px solid #E5E7EB; }}
+      .stTabs [data-baseweb="tab"] {{
+        background: transparent; border-radius: 0; padding: 10px 6px;
+        color: #334155; font-weight: 600; border-bottom: 2px solid transparent;
+      }}
+      .stTabs [data-baseweb="tab"]:hover {{ color: {brand}; }}
+      .stTabs [aria-selected="true"] {{
+        color: {brand} !important; border-bottom: 2px solid {brand};
+      }}
 
-      /* Inputs */
-      .stTextInput>div>div>input, .stSelectbox div[data-baseweb="select"]>div {
-        border-radius: 10px;
-      }
+      /* buttons (light) */
+      .stButton>button {{
+        background:{brand}; color:#fff; border:0; border-radius:8px;
+        padding:10px 14px; font-weight:600;
+      }}
+      .stButton>button:hover {{ filter:brightness(.96); }}
 
-      /* Cards */
-      .hr-card {
-        background:#fff; border:1px solid #EEF2FF; border-radius:14px;
-        padding:18px; box-shadow:0 6px 18px rgba(0,0,0,.04);
-      }
+      /* inputs a bit rounder */
+      .stTextInput>div>div>input, .stSelectbox div[data-baseweb="select"]>div,
+      .stTextArea textarea, .stDateInput input {{
+        border-radius: 8px;
+      }}
 
-      /* Small status pills */
-      .pill { display:inline-block; padding:3px 10px; border-radius:999px;
-              font-size:12px; font-weight:700; }
-      .pill-green { background:#E8FFF2; color:#0A6F3C; }
-      .pill-amber { background:#FFF8E6; color:#8A5B00; }
-      .pill-red   { background:#FFECEC; color:#9C1C1C; }
+      /* dataframes: slightly tighter header */
+      [data-testid="stDataFrame"] .st-emotion-cache-1uixxwy {{ font-weight:600; }}
+
+      /* remove extra form shadow if any */
+      .stForm {{ box-shadow:none; }}
     </style>
     """, unsafe_allow_html=True)
 
 def render_topbar(user_email: str | None = None, logo_path: str | None = "C24-logo.png"):
     with st.container():
-        c1, c2, c3 = st.columns([1, 6, 2], vertical_alignment="center")
+        c1, c2, c3 = st.columns([1, 6, 3], vertical_alignment="center")
+        # left: small logo if present
         if logo_path:
             try:
                 c1.image(logo_path, use_container_width=True)
             except Exception:
                 c1.write("")
-        c2.markdown(
-            "<h2 style='margin:0; color:#0B2545;'>HR Document Portal</h2>",
-            unsafe_allow_html=True
-        )
+        # center: title
+        c2.markdown("<h2 class='hr-title'>HR Document Portal</h2>", unsafe_allow_html=True)
+        # right: signed-in line
         if user_email:
-            c3.markdown(
-                f"<div style='text-align:right;'><span class='pill pill-green'>Signed in</span>"
-                f"<div style='font-size:12px;color:#64748B;'>{user_email}</div></div>",
-                unsafe_allow_html=True
-            )
+            c3.markdown(f"<div style='text-align:right;' class='hr-subtle'>Signed in: {user_email}</div>", unsafe_allow_html=True)
         else:
-            c3.markdown(
-                "<div style='text-align:right; color:#94A3B8; font-size:12px;'>© 2025 CARS24 HR</div>",
-                unsafe_allow_html=True
-            )
+            c3.markdown("<div></div>", unsafe_allow_html=True)
 
 def expiry_badge(days: int | float | None) -> str:
     try:
         d = int(days)
     except Exception:
         return ""
-    if d < 0:
-        return "❌ expired"
-    if d <= 30:
-        return "⚠️ due ≤30d"
-    if d <= 60:
-        return "🟡 due ≤60d"
+    if d < 0:  return "❌ expired"
+    if d <= 30: return "⚠️ due ≤30d"
+    if d <= 60: return "🟡 due ≤60d"
     return "✅ ok"
 
 # ===================================================================
@@ -147,10 +137,8 @@ def dbx_ensure_folder(path: str):
     try:
         dbx.files_get_metadata(path)
     except Exception:
-        try:
-            dbx.files_create_folder_v2(path)
-        except Exception:
-            pass
+        try: dbx.files_create_folder_v2(path)
+        except Exception: pass
 
 def dbx_upload_bytes(path: str, data: bytes):
     dbx_ensure_folder("/".join(path.split("/")[:-1]))
@@ -165,8 +153,7 @@ def dbx_download_bytes(path: str) -> bytes | None:
 
 def dbx_exists(path: str) -> bool:
     try:
-        dbx.files_get_metadata(path)
-        return True
+        dbx.files_get_metadata(path); return True
     except Exception:
         return False
 
@@ -351,6 +338,7 @@ if "serve" in st.query_params:
     name = to_display_name(target_ref)
     mime, _ = mimetypes.guess_type(name)
 
+    inject_css()
     render_topbar(None)
     st.markdown(f"### {name}")
     if name.lower().endswith(".pdf") and data and len(data) < 15_000_000:
@@ -377,7 +365,6 @@ def page_upload(con, user):
         return
 
     st.subheader("Documents Upload")
-    st.markdown("<div class='hr-card'>", unsafe_allow_html=True)
     with st.form("upf", clear_on_submit=True):
         doc_type = st.selectbox("Document Type", ["SOP", "BRD", "Policy", "Contract"])
         name = st.text_input("Name")
@@ -387,8 +374,6 @@ def page_upload(con, user):
         doc = st.file_uploader("Key Document *")
         email = st.file_uploader("Approval/email attachment (optional)")
         ok = st.form_submit_button("Upload")
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if ok:
         if not name or not doc or not remarks.strip():
@@ -418,7 +403,8 @@ def page_upload(con, user):
             ),
         )
         con.commit()
-        insert_audit(con, user["username"], "UPLOAD", details=f"Uploaded {doc_type}/{name} v{version}; approved_by='{approved_by}'; remarks='{remarks.strip()}'")
+        insert_audit(con, user["username"], "UPLOAD",
+                     details=f"Uploaded {doc_type}/{name} v{version}; approved_by='{approved_by}'; remarks='{remarks.strip()}'")
         backup_db_to_dropbox()
         st.success(f"Uploaded as version {version}")
 
@@ -436,11 +422,9 @@ def versions_with_links(con, versions_df):
 def page_documents(con, user):
     st.subheader("Browse Documents")
     df = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
-    st.markdown("<div class='hr-card'>", unsafe_allow_html=True)
 
     if df.empty:
         st.info("No documents available")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     col1, col2, col3 = st.columns(3)
@@ -454,9 +438,7 @@ def page_documents(con, user):
     if appr_q:     f = f[f["approved_by"].str.contains(appr_q, case=False, na=False)]
 
     if f.empty:
-        st.info("No matching documents")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
+        st.info("No matching documents"); return
 
     f["version"] = f["version"].astype(int)
     latest_flags = f.groupby(["doc_type", "name"])["version"].transform("max")
@@ -466,7 +448,6 @@ def page_documents(con, user):
         f[["doc_type", "name", "version", "is_latest", "created_date", "upload_date", "approved_by", "uploaded_by", "remarks"]],
         use_container_width=True
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### Open a document group")
@@ -491,13 +472,9 @@ def page_documents(con, user):
 def page_deleted(con, user):
     st.subheader("Deleted Versions")
     df = pd.read_sql("SELECT * FROM documents WHERE is_deleted=1", con)
-    st.markdown("<div class='hr-card'>", unsafe_allow_html=True)
     if df.empty:
-        st.info("None")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
+        st.info("None"); return
     st.dataframe(df[["id", "doc_type", "name", "version", "uploaded_by", "remarks"]], use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
     if user["role"] != "admin":
         return
     sel = st.selectbox("Restore ID", df["id"])
@@ -511,24 +488,18 @@ def page_deleted(con, user):
 def page_audit(con, user=None):
     st.subheader("Audit Log")
     df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
-    st.markdown("<div class='hr-card'>", unsafe_allow_html=True)
     if df.empty:
-        st.info("No logs")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
+        st.info("No logs"); return
     st.download_button("⬇️ Export CSV", df.to_csv(index=False).encode(), "audit.csv", key="audit_csv")
     buf = BytesIO(); df.to_excel(buf, index=False)
     st.download_button("⬇️ Export Excel", buf.getvalue(), "audit.xlsx", key="audit_xlsx")
     st.dataframe(df, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 def page_manage_users(con, user):
     if user["role"] != "admin":
         st.error("Access denied"); return
 
     st.subheader("Manage Users")
-    st.markdown("<div class='hr-card'>", unsafe_allow_html=True)
-
     with st.form("add_user", clear_on_submit=True):
         email = st.text_input("User Email")
         pwd = st.text_input("Password", type="password")
@@ -566,26 +537,19 @@ def page_manage_users(con, user):
                 backup_db_to_dropbox()
                 st.success("User deleted"); st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
 def page_contracts(con, user):
-    """Design-friendly contracts page. If table doesn't exist yet, show a note."""
+    """Contracts page shows clean table if contracts table exists."""
     st.subheader("Contracts")
-    st.markdown("<div class='hr-card'>", unsafe_allow_html=True)
     cur = con.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='contracts'")
     if not cur.fetchone():
         st.info("Contracts table not found yet. Once contracts module is enabled, uploads will appear here.")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     df = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
     if df.empty:
-        st.info("No contracts yet.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
+        st.info("No contracts yet."); return
 
-    # Parse dates safely and add badge
     today = pd.Timestamp.today().normalize()
     for col in ["start_date", "end_date"]:
         if col in df.columns:
@@ -597,7 +561,6 @@ def page_contracts(con, user):
     cols = [c for c in ["vendor", "name", "status", "start_date", "end_date", "Expiry",
                         "version", "uploaded_by", "remarks"] if c in df.columns]
     st.dataframe(df[cols], use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # ===================================================================
 #                                MAIN
