@@ -638,7 +638,7 @@ def page_contracts(con, user):
                 name   = st.text_input("Contract Name *")
                 vendor = st.text_input("Vendor *")
                 owner  = st.text_input("Internal Owner / POC")
-                status = st.selectbox("Status", ["Active", "Under review", "Terminated", "Expired"])
+                status = st.selectbox("Status", ["Active", "Under review", "Expired"])
             with c2:
                 start  = st.date_input("Start date *", dt.date.today())
                 end    = st.date_input("End date *", dt.date.today())
@@ -691,7 +691,7 @@ def page_contracts(con, user):
     c1, c2, c3, c4 = st.columns(4)
     with c1: v_q = st.text_input("Search vendor", key="contracts_filter_vendor")
     with c2: o_q = st.text_input("Search owner", key="contracts_filter_owner")
-    with c3: s_q = st.selectbox("Status", ["All", "Active", "Under review", "Terminated", "Expired"],
+    with c3: s_q = st.selectbox("Status", ["All", "Active", "Under review", "Expired"],
                                 key="contracts_filter_status")
     with c4: exp_days = st.selectbox("Expiring in", ["All", 30, 60, 90], key="contracts_filter_exp")
 
