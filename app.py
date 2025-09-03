@@ -440,7 +440,7 @@ def main():
 
     user = st.session_state.get("user")
     if not user:
-        # Minimal login (you can swap with your styled login later)
+        # Minimal login
         st.title(APP_TITLE)
         u = st.text_input("Email")
         p = st.text_input("Password", type="password")
