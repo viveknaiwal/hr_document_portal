@@ -190,7 +190,6 @@ def _hash(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def init_db():
-    # Pull latest SQLite from Dropbox if available
     if USE_DROPBOX:
         dbx_db_path = dbx_path("db", "hr_docs.db")
         data = dbx_download_bytes(dbx_db_path)
@@ -259,7 +258,6 @@ def init_db():
             created_date TEXT
         );
 
-        -- 30-day auth tokens for reload survival
         CREATE TABLE IF NOT EXISTS auth_tokens (
             token TEXT PRIMARY KEY,
             email TEXT,
@@ -268,7 +266,6 @@ def init_db():
         """
     )
 
-    # Ensure admin exists
     cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
     if cur.fetchone()[0] == 0:
         default_admin = st.secrets.get("DEFAULT_ADMIN_EMAIL", "admin@cars24.com").lower()
@@ -279,7 +276,6 @@ def init_db():
         )
         con.commit()
 
-    # Safe migrations
     for stmt in [
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
@@ -801,9 +797,8 @@ def main():
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
 
-    # ---------- Auto-login via ?auth= token ----------
-    qp = st.experimental_get_query_params()
-    token_param = qp.get("auth", [None])[0]
+    # ---------- Auto-login via ?auth= token (use ONLY st.query_params) ----------
+    token_param = st.query_params.get("auth", None)
     if not st.session_state.get("user") and token_param:
         user_from_token = validate_auth_token(con, token_param)
         if user_from_token:
@@ -822,9 +817,7 @@ def main():
                 insert_audit(con, u, "LOGIN")
                 if keep:
                     tok = new_auth_token(con, auth["username"], days=30)
-                    qp = st.experimental_get_query_params()
-                    qp["auth"] = tok
-                    st.experimental_set_query_params(**qp)
+                    st.query_params["auth"] = tok   # set with new API
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -832,11 +825,10 @@ def main():
     else:
         st.sidebar.write(f"Signed in as {user['username']} ({user['role']})")
         if st.sidebar.button("Logout"):
-            qp = st.experimental_get_query_params()
-            tok = qp.get("auth", [None])[0]
+            tok = st.query_params.get("auth", None)
             if tok: delete_auth_token(con, tok)
-            qp.pop("auth", None)
-            st.experimental_set_query_params(**qp)
+            if "auth" in st.query_params:
+                del st.query_params["auth"]   # remove with new API
             insert_audit(con, user["username"], "LOGOUT")
             st.session_state.pop("user")
             st.rerun()
