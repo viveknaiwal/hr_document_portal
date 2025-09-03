@@ -866,19 +866,30 @@ def main():
         if user["role"] == "admin":
             tabs += ["Deleted", "Audit", "Manage Users"]
 
-        # 🔵 Make the active tab text and underline blue
-        st.markdown("""
-        <style>
-        /* underline bar under the active tab */
-        .stTabs [data-baseweb="tab-highlight"] {
-          background-color: #2563EB !important;
-        }
-        /* active tab text */
-        .stTabs [role="tab"][aria-selected="true"] p {
-          color: #2563EB !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+       # make tabs blue (active + hover)
+st.markdown("""
+<style>
+/* active underline */
+.stTabs [data-baseweb="tab-highlight"] {
+  background-color: #2563EB !important;
+}
+/* active tab text */
+.stTabs [role="tab"][aria-selected="true"] p {
+  color: #2563EB !important;
+}
+/* hover color for inactive tabs */
+.stTabs [role="tab"]:not([aria-selected="true"]) p { 
+  transition: color .15s ease;
+}
+.stTabs [role="tab"]:not([aria-selected="true"]):hover p,
+.stTabs [role="tab"]:not([aria-selected="true"]):focus p {
+  color: #2563EB !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+t = st.tabs(tabs)
+
 
         
 
