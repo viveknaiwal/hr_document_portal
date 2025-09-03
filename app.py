@@ -790,41 +790,36 @@ def page_manage_users(con, user):
                 st.success("User deleted"); st.rerun()
 
 # ===================================================================
-#                         LOGIN UI (UPDATED)
+#                         LOGIN UI (NEW)
 # ===================================================================
 def style_login():
-    """CSS for login only (hides Streamlit header, adds background, styles card)."""
-    brand = "#1F4FFF"   # primary accent (title + button)
-    ink   = brand       # title color requested: blue
-    muted = "#64748B"
-    line  = "#E6EAF0"
+    """CSS for login card only. Tweak variables to change look."""
+    brand = "#1F4FFF"   # primary button color
+    ink   = "#0B2545"   # heading color
+    muted = "#64748B"   # subtle text
+    line  = "#E6EAF0"   # card border
 
     st.markdown(f"""
     <style>
-      /* Hide Streamlit's default header/menu/footer on login page */
-      header[data-testid="stHeader"] {{ display:none; }}
-      #MainMenu, .stDeployButton, footer {{ visibility:hidden; }}
-
-      /* Softer page background so the card looks lifted */
-      .stApp {{
-        background: linear-gradient(180deg, #F6F8FF 0%, #F3F6FB 60%, #EEF2F7 100%);
-      }}
-      .block-container {{ padding-top: 2.5rem; }}
-
-      /* Login card */
       .login-card {{
         background:#fff; border:1px solid {line}; border-radius:16px;
-        padding:28px; box-shadow:0 12px 28px rgba(16,24,40,.10);
+        padding:28px; box-shadow:0 6px 22px rgba(16,24,40,.06);
       }}
       .login-logo img {{ max-height:44px; width:auto; display:block; margin:0 auto 6px; }}
-      .login-title {{ margin:0; text-align:center; font-weight:800; font-size:26px; color:{ink}; }}
-      .login-sub   {{ text-align:center; color:{muted}; margin:8px 0 18px; font-size:13px; }}
+      .login-title {{ margin:0; text-align:center; font-weight:800; font-size:24px; color:{ink}; }}
+      .login-sub   {{ text-align:center; color:{muted}; margin:6px 0 18px; font-size:13px; }}
 
+      /* round inputs */
       .login-card .stTextInput>div>div>input,
-      .login-card .stPasswordInput>div>div>input {{ border-radius:10px; }}
+      .login-card .stPasswordInput>div>div>input,
+      .login-card .stCheckbox>div>label {{
+        border-radius:10px;
+      }}
 
+      /* full-width primary button (scoped to the card) */
       .login-card .stButton>button {{
-        width:100%; background:{brand}; color:#fff; border:0; border-radius:10px;
+        width:100%;
+        background:{brand}; color:#fff; border:0; border-radius:10px;
         padding:12px 16px; font-size:15px; font-weight:700;
         box-shadow:0 2px 6px rgba(16,24,40,.08);
       }}
@@ -836,14 +831,14 @@ def style_login():
 def login_view():
     """Render login card and return (submitted, email, password, keep)."""
     style_login()
-    # Center the card; wider center column so it feels balanced
-    col_l, col_c, col_r = st.columns([1, 1.2, 1])
+
+    # center the card
+    col_l, col_c, col_r = st.columns([1, 1, 1])
     with col_c:
         st.markdown("<div class='login-card'>", unsafe_allow_html=True)
-        # Optional logo (won't error if file missing)
         try:
             st.markdown("<div class='login-logo'>", unsafe_allow_html=True)
-            st.image("C24-logo.png")
+            st.image("C24-logo.png")  # replace with your logo filename if different
             st.markdown("</div>", unsafe_allow_html=True)
         except Exception:
             pass
@@ -851,6 +846,7 @@ def login_view():
         st.markdown("<h3 class='login-title'>HR Document Portal</h3>", unsafe_allow_html=True)
         st.markdown("<div class='login-sub'>Secure access for HR and Admin users</div>", unsafe_allow_html=True)
 
+        # Use a form so Enter submits
         with st.form("login_form", clear_on_submit=False):
             u = st.text_input("Email", key="login_email")
             p = st.text_input("Password", type="password", key="login_pwd")
@@ -868,7 +864,7 @@ def main():
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
 
-    # ---------- Auto-login via ?auth= token ----------
+    # ---------- Auto-login via ?auth= token (use ONLY st.query_params) ----------
     token_param = st.query_params.get("auth", None)
     if not st.session_state.get("user") and token_param:
         user_from_token = validate_auth_token(con, token_param)
@@ -877,6 +873,7 @@ def main():
 
     user = st.session_state.get("user")
     if not user:
+        # Login page (only the UI changed)
         submitted, u, p, keep = login_view()
         if submitted:
             auth = authenticate(u, p, con)
@@ -885,7 +882,7 @@ def main():
                 insert_audit(con, u, "LOGIN")
                 if keep:
                     tok = new_auth_token(con, auth["username"], days=30)
-                    st.query_params["auth"] = tok
+                    st.query_params["auth"] = tok   # set with new API
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -896,7 +893,7 @@ def main():
             tok = st.query_params.get("auth", None)
             if tok: delete_auth_token(con, tok)
             if "auth" in st.query_params:
-                del st.query_params["auth"]
+                del st.query_params["auth"]   # remove with new API
             insert_audit(con, user["username"], "LOGOUT")
             st.session_state.pop("user")
             st.rerun()
