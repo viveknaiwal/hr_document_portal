@@ -31,7 +31,6 @@ try:
     import dropbox
 
     if "DROPBOX_REFRESH_TOKEN" in st.secrets:
-        # Preferred (never expires)
         dbx = dropbox.Dropbox(
             oauth2_refresh_token=st.secrets["DROPBOX_REFRESH_TOKEN"],
             app_key=st.secrets["DROPBOX_APP_KEY"],
@@ -39,7 +38,6 @@ try:
         )
         USE_DROPBOX = True
     elif "DROPBOX_ACCESS_TOKEN" in st.secrets and st.secrets["DROPBOX_ACCESS_TOKEN"].strip():
-        # Fallback (short-lived)
         DBX_TOKEN = st.secrets["DROPBOX_ACCESS_TOKEN"].strip()
         dbx = dropbox.Dropbox(DBX_TOKEN)
         USE_DROPBOX = True
@@ -122,7 +120,6 @@ def _hash(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def init_db():
-    """On Cloud: pull latest DB from Dropbox into local file, then open."""
     if USE_DROPBOX:
         dbx_db_path = dbx_path("db", "hr_docs.db")
         data = dbx_download_bytes(dbx_db_path)
@@ -193,7 +190,7 @@ def init_db():
         """
     )
 
-    # Bootstrap: ensure at least one admin user exists
+    # Bootstrap admin
     cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
     if cur.fetchone()[0] == 0:
         default_admin = st.secrets.get("DEFAULT_ADMIN_EMAIL", "admin@cars24.com").lower()
@@ -204,7 +201,7 @@ def init_db():
         )
         con.commit()
 
-    # Safe migrations (for existing DBs missing columns)
+    # Safe migrations
     for stmt in [
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
@@ -217,7 +214,6 @@ def init_db():
     return con
 
 def backup_db_to_dropbox():
-    """Push the local sqlite DB to Dropbox after writes."""
     if USE_DROPBOX and LOCAL_DB_PATH.exists():
         dbx_upload_bytes(dbx_path("db", "hr_docs.db"), LOCAL_DB_PATH.read_bytes())
 
@@ -293,14 +289,13 @@ def make_zip(refs: list) -> bytes:
                     zf.writestr(to_display_name(ref), data)
     return buf.getvalue()
 
-# Helper: robust "days to expiry" (fixes .dt.date issue)
 def _days_to_expiry(end_series):
-    end_dt = pd.to_datetime(end_series, errors="coerce")        # datetime64[ns]
-    today_ts = pd.Timestamp(dt.date.today())                    # midnight today
-    return (end_dt - today_ts).dt.days                          # Int64 (NaN where invalid)
+    end_dt = pd.to_datetime(end_series, errors="coerce")
+    today_ts = pd.Timestamp(dt.date.today())
+    return (end_dt - today_ts).dt.days
 
 # ===================================================================
-#                               SERVE MODE (with VIEW audit)
+#                               SERVE MODE (audit VIEW)
 # ===================================================================
 if "serve" in st.query_params:
     token = st.query_params["serve"]
@@ -309,14 +304,12 @@ if "serve" in st.query_params:
     target_ref = None
     found_table, found_id = None, None
 
-    # documents
     for rid, fp, ep, ft, et in con.execute(
         "SELECT id,file_path,email_path,file_token,email_token FROM documents WHERE is_deleted=0"
     ).fetchall():
         if token == ft: target_ref, found_table, found_id = fp, "documents", rid
         if token == et: target_ref, found_table, found_id = ep, "documents", rid
 
-    # contracts
     if not target_ref:
         for rid, fp, ep, ft, et in con.execute(
             "SELECT id,file_path,email_path,file_token,email_token FROM contracts WHERE is_deleted=0"
@@ -327,7 +320,6 @@ if "serve" in st.query_params:
     if not target_ref or not ref_exists(target_ref):
         st.error("File not found"); st.stop()
 
-    # audit the view
     actor = (st.session_state.get("user") or {}).get("username", "public")
     insert_audit(con, actor, "VIEW", found_id, f"{found_table}:{to_display_name(target_ref)}")
 
@@ -362,7 +354,7 @@ def page_upload(con, user):
         name = st.text_input("Name")
         created_date = st.date_input("Created", dt.date.today())
         approved_by = st.text_input("Approved by")
-        remarks = st.text_area("Remarks / Context *", help="Explain the context or purpose of this upload", height=100)
+        remarks = st.text_area("Remarks / Context *", height=100)
         doc = st.file_uploader("Key Document *")
         email = st.file_uploader("Approval/email attachment (optional)")
         ok = st.form_submit_button("Upload")
@@ -373,7 +365,6 @@ def page_upload(con, user):
             return
 
         data = doc.read()
-
         cur = con.execute("SELECT MAX(version) FROM documents WHERE name=? AND doc_type=?", (name, doc_type))
         maxv = cur.fetchone()[0]
         version = (maxv + 1) if maxv else 1
@@ -412,13 +403,23 @@ def versions_with_links(con, versions_df):
     df["View (email)"] = view_email
     return df
 
+def versions_with_links_contracts(con, versions_df):
+    df = versions_df.copy()
+    view_doc, view_email = [], []
+    for r in df.itertuples():
+        ft, et = ensure_tokens_generic(con, "contracts", getattr(r, "id"), bool(getattr(r, "email_path")))
+        view_doc.append(f"/?serve={ft}" if ft else "—")
+        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
+    df["View (doc)"] = view_doc
+    df["View (email)"] = view_email
+    return df
+
 def page_documents(con, user):
     st.subheader("Browse Documents")
 
-    # Base documents
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
 
-    # Contracts (shown by default)
+    # Contracts visible here as a type
     c = pd.read_sql(
         """SELECT id, 'Contract' AS doc_type, name,
                   start_date AS created_date, upload_date,
@@ -434,7 +435,6 @@ def page_documents(con, user):
     if f.empty:
         st.info("No documents available"); return
 
-    # Filters (unique keys)
     col1, col2, col3 = st.columns(3)
     with col1: t = st.selectbox("Type", ["All"] + sorted(f["doc_type"].unique().tolist()), key="docs_filter_type")
     with col2: name_q = st.text_input("Search name", key="docs_filter_name")
@@ -458,7 +458,7 @@ def page_documents(con, user):
         use_container_width=True
     )
 
-    # Open a group – detect if it's a contract and pull the right table with links
+    # Open a group
     st.markdown("---")
     st.markdown("### Open a document group")
     groups = g.drop_duplicates(subset=["doc_type", "name", "vendor"])
@@ -477,9 +477,10 @@ def page_documents(con, user):
         v_table = versions_with_links_contracts(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","status",
                           "start_date","end_date","remarks","View (doc)","View (email)"]]
+        # NOTE: unique key prefix here to avoid collision with the Contracts tab
         st.data_editor(
             v_show, use_container_width=True, disabled=True,
-            key=f"contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
+            key=f"docs_contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
             column_config={
                 "View (doc)": st.column_config.LinkColumn("View (doc)"),
                 "View (email)": st.column_config.LinkColumn("View (email)")
@@ -502,7 +503,6 @@ def page_documents(con, user):
             }
         )
 
-    # Delete selected version (admin only) – unique keys
     if user["role"] == "admin" and sel_group["doc_type"] != "Contract":
         choice = st.selectbox(
             "Select version to delete",
@@ -534,22 +534,11 @@ def page_deleted(con, user):
         backup_db_to_dropbox()
         st.success("Restored"); st.rerun()
 
-# -------------------- CONTRACTS --------------------
-def versions_with_links_contracts(con, versions_df):
-    df = versions_df.copy()
-    view_doc, view_email = [], []
-    for r in df.itertuples():
-        ft, et = ensure_tokens_generic(con, "contracts", getattr(r, "id"), bool(getattr(r, "email_path")))
-        view_doc.append(f"/?serve={ft}" if ft else "—")
-        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
-    df["View (doc)"] = view_doc
-    df["View (email)"] = view_email
-    return df
-
+# -------------------- CONTRACTS PAGE --------------------
 def page_contracts(con, user):
     st.subheader("Contract Management")
 
-    # Upload
+    # Upload (admin/editor)
     can_upload = user["role"] in {"admin", "editor"}
     if can_upload:
         with st.form("contract_form", clear_on_submit=True):
@@ -607,7 +596,6 @@ def page_contracts(con, user):
     if df.empty:
         st.info("No contracts yet."); return
 
-    # Days to expiry (robust)
     df["days_to_expiry"] = _days_to_expiry(df["end_date"])
 
     c1, c2, c3, c4 = st.columns(4)
@@ -659,7 +647,6 @@ def page_contracts(con, user):
                 }
             )
 
-            # Delete (admin only) – unique keys
             if user["role"] == "admin":
                 choice = st.selectbox(
                     "Select version to delete",
@@ -726,7 +713,7 @@ def page_manage_users(con, user):
                 con.commit()
                 insert_audit(con, user["username"], "ADD_USER", details=f"{email.strip().lower()} as {role}")
                 backup_db_to_dropbox()
-                st.success(f"User {email} added as {role}")
+                st.success("User added")
             except sqlite3.IntegrityError:
                 st.error("User already exists")
 
@@ -791,7 +778,7 @@ def main():
             with t[tabs.index("Contracts")]:
                 page_contracts(con, user)
         if "Deleted" in tabs:
-            with t[tabs.index("Deleted")] :
+            with t[tabs.index("Deleted")]:
                 page_deleted(con, user)
         if "Audit" in tabs:
             with t[tabs.index("Audit")]:
