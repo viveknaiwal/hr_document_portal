@@ -204,7 +204,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             doc_type TEXT,
-            name TEXT,
+            Name TEXT,
             created_date TEXT,
             upload_date TEXT,
             approved_by TEXT,
