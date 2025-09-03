@@ -6,6 +6,7 @@
 # - Storage backends (priority): Google Drive -> Dropbox -> Local
 # - 30-day "stay signed in" token via URL ?auth=... (survives reload)
 # - Robust PDF viewer with base64 <object>/<embed> + download fallback
+# - Canva-styled login: hidden header, centered blue title, lifted card
 # ------------------------------------------------------------------
 
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
@@ -16,7 +17,7 @@ import streamlit as st
 
 APP_TITLE = "HR Document Portal"
 
-# ---------------- Local storage (fallback when no cloud available)
+# ---------------- Local storage (fallback)
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
 LOCAL_DB_PATH = Path("storage/hr_docs.db")
 LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -190,6 +191,7 @@ def _hash(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def init_db():
+    # Pull latest DB from Dropbox if available
     if USE_DROPBOX:
         dbx_db_path = dbx_path("db", "hr_docs.db")
         data = dbx_download_bytes(dbx_db_path)
@@ -266,6 +268,7 @@ def init_db():
         """
     )
 
+    # Bootstrap admin
     cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
     if cur.fetchone()[0] == 0:
         default_admin = st.secrets.get("DEFAULT_ADMIN_EMAIL", "admin@cars24.com").lower()
@@ -276,6 +279,7 @@ def init_db():
         )
         con.commit()
 
+    # Safe migrations
     for stmt in [
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
@@ -449,12 +453,68 @@ if "serve" in st.query_params:
     st.stop()
 
 # ===================================================================
+#                        LOGIN UI (Canva style)
+# ===================================================================
+def style_login():
+    """CSS for login card only. (Injected only on login screen.)"""
+    st.markdown("""
+    <style>
+      header[data-testid="stHeader"] { display:none !important; } /* hide top bar on login */
+      #MainMenu, .stDeployButton, footer { visibility:hidden; }
+
+      .login-box {
+        background-color: #ffffff;
+        padding: 28px 28px 32px 28px;
+        border-radius: 16px;
+        box-shadow: 0 6px 22px rgba(16,24,40,.08);
+        text-align: center;
+        max-width: 440px;
+        margin: 40px auto 0;
+        border: 1px solid #E6EAF0;
+      }
+      .login-box h1 {
+        font-size: 28px;
+        margin: 8px 0 6px;
+        color: #1F4FFF;               /* blue center title */
+        font-weight: 800;
+      }
+      .login-sub {
+        color:#64748B; font-size:13px; margin-bottom: 18px;
+      }
+      input[type='password'], input[type='text'] {
+        border-radius: 10px !important;
+      }
+      .login-box .stButton>button {
+        width: 100%;
+        background:#1F4FFF; color:#fff; border:0; border-radius:10px;
+        padding:12px 16px; font-size:15px; font-weight:700;
+        box-shadow:0 2px 6px rgba(16,24,40,.08);
+      }
+      .login-box .stButton>button:hover { filter:brightness(.96); }
+    </style>
+    """, unsafe_allow_html=True)
+
+def login_view():
+    """Render login card and return (submitted, email, password, keep)."""
+    style_login()
+    st.markdown('<div class="login-box">', unsafe_allow_html=True)
+    st.image("https://cdn-icons-png.flaticon.com/512/942/942748.png", width=64)
+    st.markdown(f"<h1>{APP_TITLE}</h1>", unsafe_allow_html=True)
+    st.markdown('<div class="login-sub">Secure access for HR and Admin users</div>', unsafe_allow_html=True)
+    with st.form("login_form", clear_on_submit=False):
+        u = st.text_input("📧 Email", key="login_email")
+        p = st.text_input("🔒 Password", type="password", key="login_pwd")
+        keep = st.checkbox("✅ Keep me signed in on this device", value=True)
+        submitted = st.form_submit_button("🔓 Login", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    return submitted, u, p, keep
+
+# ===================================================================
 #                                PAGES
 # ===================================================================
 def page_upload(con, user):
     if user["role"] not in {"admin", "editor"}:
-        st.info("You have viewer access — uploads are disabled.")
-        return
+        st.info("You have viewer access — uploads are disabled."); return
 
     st.subheader("Upload Document")
     with st.form("upf", clear_on_submit=True):
@@ -790,32 +850,13 @@ def page_manage_users(con, user):
                 st.success("User deleted"); st.rerun()
 
 # ===================================================================
-#                         LOGIN UI (NEW) — ONLY HEADER HIDDEN
+#                         DASHBOARD METRICS
 # ===================================================================
-def style_login():
-    """CSS scoped to the login page.
-    We only hide the Streamlit top header/upper bar here.
-    """
-    st.markdown("""
-    <style>
-      header[data-testid="stHeader"] { display:none !important; }
-      #MainMenu, .stDeployButton, footer { visibility:hidden; }
-    </style>
-    """, unsafe_allow_html=True)
-
-def login_view():
-    """Render login form and return (submitted, email, password, keep)."""
-    style_login()
-
-    col_l, col_c, col_r = st.columns([1, 1, 1])
-    with col_c:
-        with st.form("login_form", clear_on_submit=False):
-            st.title(APP_TITLE)
-            u = st.text_input("Email", key="login_email")
-            p = st.text_input("Password", type="password", key="login_pwd")
-            keep = st.checkbox("Keep me signed in on this device", value=True)
-            submitted = st.form_submit_button("Login", use_container_width=True)
-    return submitted, u, p, keep
+def dashboard_metrics(con):
+    col1, col2, col3 = st.columns(3)
+    col1.metric("📄 Documents", len(pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)))
+    col2.metric("🤝 Contracts", len(pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)))
+    col3.metric("👥 Users", len(pd.read_sql("SELECT * FROM users", con)))
 
 # ===================================================================
 #                                MAIN
@@ -825,7 +866,7 @@ def main():
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
 
-    # ---------- Auto-login via ?auth= token (use ONLY st.query_params) ----------
+    # Auto-login via ?auth=
     token_param = st.query_params.get("auth", None)
     if not st.session_state.get("user") and token_param:
         user_from_token = validate_auth_token(con, token_param)
@@ -842,46 +883,60 @@ def main():
                 insert_audit(con, u, "LOGIN")
                 if keep:
                     tok = new_auth_token(con, auth["username"], days=30)
-                    st.query_params["auth"] = tok   # set with new API
+                    st.query_params["auth"] = tok
                 st.rerun()
             else:
-                st.error("Invalid credentials")
-                return
+                st.error("Invalid credentials"); return
     else:
-        st.sidebar.write(f"Signed in as {user['username']} ({user['role']})")
-        if st.sidebar.button("Logout"):
+        # Sidebar + logout
+        st.sidebar.markdown("## 👤 User Info")
+        st.sidebar.success(f"{user['username']} ({user['role']})")
+        st.sidebar.markdown("---")
+        if st.sidebar.button("🚪 Logout"):
             tok = st.query_params.get("auth", None)
             if tok: delete_auth_token(con, tok)
             if "auth" in st.query_params:
-                del st.query_params["auth"]   # remove with new API
+                del st.query_params["auth"]
             insert_audit(con, user["username"], "LOGOUT")
-            st.session_state.pop("user")
-            st.rerun()
+            st.session_state.pop("user"); st.rerun()
 
-        tabs = ["Documents", "Upload", "Contracts"]
+        # Emoji tabs
+        tabs = ["📄 Documents", "⬆️ Upload", "🤝 Contracts"]
         if user["role"] == "viewer":
-            tabs = ["Documents", "Contracts"]
+            tabs = ["📄 Documents", "🤝 Contracts"]
         if user["role"] == "admin":
-            tabs += ["Deleted", "Audit", "Manage Users"]
+            tabs += ["🗑️ Deleted", "🕵️ Audit", "👥 Manage Users"]
 
         t = st.tabs(tabs)
         with t[0]:
+            st.markdown("### 📊 Portal Snapshot")
+            dashboard_metrics(con)
             page_documents(con, user)
-        if "Upload" in tabs:
-            with t[tabs.index("Upload")]:
+
+        if "⬆️ Upload" in tabs:
+            with t[tabs.index("⬆️ Upload")]:
                 page_upload(con, user)
-        if "Contracts" in tabs:
-            with t[tabs.index("Contracts")]:
+
+        if "🤝 Contracts" in tabs:
+            with t[tabs.index("🤝 Contracts")]:
+                st.markdown("### 📊 Portal Snapshot")
+                dashboard_metrics(con)
                 page_contracts(con, user)
-        if "Deleted" in tabs:
-            with t[tabs.index("Deleted")]:
+
+        if "🗑️ Deleted" in tabs:
+            with t[tabs.index("🗑️ Deleted")]:
                 page_deleted(con, user)
-        if "Audit" in tabs:
-            with t[tabs.index("Audit")]:
+
+        if "🕵️ Audit" in tabs:
+            with t[tabs.index("🕵️ Audit")]:
                 page_audit(con)
-        if "Manage Users" in tabs:
-            with t[tabs.index("Manage Users")]:
+
+        if "👥 Manage Users" in tabs:
+            with t[tabs.index("👥 Manage Users")]:
                 page_manage_users(con, user)
 
+# ===================================================================
+# Launch
+# ===================================================================
 if __name__ == "__main__":
     main()
