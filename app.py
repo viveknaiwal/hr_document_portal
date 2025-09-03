@@ -863,6 +863,24 @@ def main():
             tabs = ["Documents", "Contracts"]
         if user["role"] == "admin":
             tabs += ["Deleted", "Audit", "Manage Users"]
+        if user["role"] == "admin":
+            tabs += ["Deleted", "Audit", "Manage Users"]
+
+        # 🔵 Make the active tab text and underline blue
+        st.markdown("""
+        <style>
+        /* underline bar under the active tab */
+        .stTabs [data-baseweb="tab-highlight"] {
+          background-color: #2563EB !important;
+        }
+        /* active tab text */
+        .stTabs [role="tab"][aria-selected="true"] p {
+          color: #2563EB !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        t = st.tabs(tabs)
 
         t = st.tabs(tabs)
         with t[0]:
