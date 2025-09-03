@@ -1,9 +1,11 @@
 # app.py
 # ------------------------------------------------------------------
-# HR Document Portal — Streamlit + (optional) Dropbox persistence
-# Admin-managed users + mandatory remarks + full audit logging
-# Adds: Contract Management (upload, browse, versioning, audit)
-# Contracts are also shown in "Documents" for all roles.
+# HR Document Portal — Streamlit
+# - Users, roles, audit log
+# - SOP/BRD/Policy + Contract Management (versioned, view links)
+# - Storage backends (priority): Google Drive -> Dropbox -> Local
+# - 30-day "stay signed in" token via URL ?auth=... (survives reload)
+# - Robust PDF viewer with base64 <object>/<embed> + download fallback
 # ------------------------------------------------------------------
 
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
@@ -12,24 +14,22 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 
-# ------------- Branding / Title
 APP_TITLE = "HR Document Portal"
 
-# ------------- Local fallback storage
+# ---------------- Local storage (fallback when no cloud available)
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
 LOCAL_DB_PATH = Path("storage/hr_docs.db")
 LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # ===================================================================
-#                        DROPBOX CONFIG
+#                         DROPBOX (optional)
 # ===================================================================
 USE_DROPBOX = False
 dbx = None
-
+DBX_ROOT = None
 try:
     import dropbox
-
     if "DROPBOX_REFRESH_TOKEN" in st.secrets:
         dbx = dropbox.Dropbox(
             oauth2_refresh_token=st.secrets["DROPBOX_REFRESH_TOKEN"],
@@ -38,20 +38,13 @@ try:
         )
         USE_DROPBOX = True
     elif "DROPBOX_ACCESS_TOKEN" in st.secrets and st.secrets["DROPBOX_ACCESS_TOKEN"].strip():
-        DBX_TOKEN = st.secrets["DROPBOX_ACCESS_TOKEN"].strip()
-        dbx = dropbox.Dropbox(DBX_TOKEN)
+        dbx = dropbox.Dropbox(st.secrets["DROPBOX_ACCESS_TOKEN"].strip())
         USE_DROPBOX = True
-    else:
-        st.warning("No Dropbox credentials found, using local storage only.")
-except Exception as e:
-    st.error(f"Dropbox init failed: {e}")
+    DBX_ROOT = st.secrets.get("DROPBOX_ROOT", "/HR_Documents_Portal").rstrip("/")
+except Exception:
     USE_DROPBOX = False
+    DBX_ROOT = "/HR_Documents_Portal"
 
-DBX_ROOT = st.secrets.get("DROPBOX_ROOT", "/HR_Documents_Portal").rstrip("/")
-
-# ===================================================================
-#                          DROPBOX HELPERS
-# ===================================================================
 def dbx_path(*parts) -> str:
     return DBX_ROOT + "/" + "/".join(str(p).strip("/").replace("\\", "/") for p in parts)
 
@@ -82,15 +75,86 @@ def dbx_exists(path: str) -> bool:
     except Exception:
         return False
 
-# Convenience wrappers (Dropbox or Local)
+# ===================================================================
+#                       GOOGLE DRIVE (optional)
+# ===================================================================
+USE_GDRIVE = False
+gdrive_service = None
+GDRIVE_ROOT_ID = None
+
+try:
+    if st.secrets.get("GDRIVE_ENABLED", False):
+        from google.oauth2.service_account import Credentials
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+
+        creds = Credentials.from_service_account_info(
+            st.secrets["GDRIVE_SERVICE_ACCOUNT_JSON"],
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        gdrive_service = build("drive", "v3", credentials=creds)
+        GDRIVE_ROOT_ID = st.secrets["GDRIVE_ROOT_FOLDER_ID"]
+        USE_GDRIVE = True
+except Exception as e:
+    st.warning(f"Google Drive not configured: {e}")
+    USE_GDRIVE = False
+
+def gdrive_get_or_create_folder(parent_id: str, name: str) -> str:
+    q = f"'{parent_id}' in parents and name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    res = gdrive_service.files().list(q=q, fields="files(id,name)").execute()
+    files = res.get("files", [])
+    if files:
+        return files[0]["id"]
+    meta = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
+    folder = gdrive_service.files().create(body=meta, fields="id").execute()
+    return folder["id"]
+
+def gdrive_upload_bytes(parts: list[str], filename: str, data: bytes) -> str:
+    parent = GDRIVE_ROOT_ID
+    for p in parts:
+        parent = gdrive_get_or_create_folder(parent, p)
+    media = MediaIoBaseUpload(BytesIO(data), mimetype=mimetypes.guess_type(filename)[0] or "application/octet-stream")
+    meta = {"name": filename, "parents": [parent]}
+    f = gdrive_service.files().create(body=meta, media_body=media, fields="id").execute()
+    return f["id"]
+
+def gdrive_download_bytes(file_id: str) -> bytes | None:
+    try:
+        req = gdrive_service.files().get_media(fileId=file_id)
+        buf = BytesIO()
+        downloader = MediaIoBaseDownload(buf, req)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        return buf.getvalue()
+    except Exception:
+        return None
+
+def gdrive_exists(file_id: str) -> bool:
+    try:
+        gdrive_service.files().get(fileId=file_id, fields="id").execute()
+        return True
+    except Exception:
+        return False
+
+# ===================================================================
+#                             STORAGE API
+# Priority: Google Drive -> Dropbox -> Local
+# ===================================================================
 def is_dbx_path(p: str) -> bool:
     return p.startswith("dbx:/")
 
 def to_display_name(p: str) -> str:
+    if p.startswith("gdrive:"):
+        parts = p.split(":", 2)
+        return parts[2] if len(parts) > 2 else "file"
     return Path(p.split(":", 1)[1] if is_dbx_path(p) else p).name
 
 def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: int, filename: str) -> str:
     safe_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+    if USE_GDRIVE:
+        file_id = gdrive_upload_bytes([doc_type, safe_name, f"v{version}"], filename, data)
+        return f"gdrive:{file_id}:{filename}"
     if USE_DROPBOX:
         remote_dir = dbx_path(doc_type, safe_name, f"v{version}")
         remote_file = remote_dir + "/" + filename
@@ -103,23 +167,30 @@ def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: in
     return "local:" + str(local_file)
 
 def read_ref_bytes(ref: str) -> bytes | None:
+    if ref.startswith("gdrive:"):
+        file_id = ref.split(":", 2)[1]
+        return gdrive_download_bytes(file_id)
     if is_dbx_path(ref):
         return dbx_download_bytes(ref.split(":", 1)[1])
     p = Path(ref.split(":", 1)[1])
     return p.read_bytes() if p.exists() else None
 
 def ref_exists(ref: str) -> bool:
+    if ref.startswith("gdrive:"):
+        file_id = ref.split(":", 2)[1]
+        return gdrive_exists(file_id)
     if is_dbx_path(ref):
         return dbx_exists(ref.split(":", 1)[1])
     return Path(ref.split(":", 1)[1]).exists()
 
 # ===================================================================
-#                          DB HELPERS
+#                                DB
 # ===================================================================
 def _hash(pw): 
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def init_db():
+    # Pull latest SQLite from Dropbox if available
     if USE_DROPBOX:
         dbx_db_path = dbx_path("db", "hr_docs.db")
         data = dbx_download_bytes(dbx_db_path)
@@ -187,10 +258,17 @@ def init_db():
             role TEXT,
             created_date TEXT
         );
+
+        -- 30-day auth tokens for reload survival
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            token TEXT PRIMARY KEY,
+            email TEXT,
+            expires TEXT
+        );
         """
     )
 
-    # Bootstrap admin
+    # Ensure admin exists
     cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
     if cur.fetchone()[0] == 0:
         default_admin = st.secrets.get("DEFAULT_ADMIN_EMAIL", "admin@cars24.com").lower()
@@ -232,6 +310,34 @@ def authenticate(username, password, con):
         return {"username": row[0], "role": row[2]}
     return None
 
+# ---------- login-token helpers (URL ?auth=...) ----------
+def new_auth_token(con, email, days=30):
+    token = secrets.token_urlsafe(24)
+    exp = (dt.datetime.utcnow() + dt.timedelta(days=days)).isoformat()
+    con.execute("INSERT OR REPLACE INTO auth_tokens (token,email,expires) VALUES (?,?,?)", (token, email, exp))
+    con.commit(); backup_db_to_dropbox()
+    return token
+
+def validate_auth_token(con, token) -> dict | None:
+    cur = con.execute("SELECT email,expires FROM auth_tokens WHERE token=?", (token,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    email, expires = r
+    if dt.datetime.fromisoformat(expires) < dt.datetime.utcnow():
+        con.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
+        con.commit(); backup_db_to_dropbox()
+        return None
+    cur = con.execute("SELECT role FROM users WHERE email=?", (email,))
+    row = cur.fetchone()
+    if not row: 
+        return None
+    return {"username": email, "role": row[0]}
+
+def delete_auth_token(con, token):
+    con.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
+    con.commit(); backup_db_to_dropbox()
+
 # ===================================================================
 #                        APP HELPERS
 # ===================================================================
@@ -252,32 +358,23 @@ def ensure_tokens(con, row_id, email_exists):
     if email_exists and not et:
         et = gen_token()
         con.execute("UPDATE documents SET email_token=? WHERE id=?", (et, row_id))
-    con.commit()
-    backup_db_to_dropbox()
+    con.commit(); backup_db_to_dropbox()
     return ft, et
 
 def ensure_tokens_generic(con, table, row_id, email_exists):
     cur = con.execute(f"SELECT file_token,email_token FROM {table} WHERE id=?", (row_id,))
     row = cur.fetchone()
     if not row: return None, None
-    ft, et = row
-    changed = False
+    ft, et = row; changed = False
     if not ft:
         ft = gen_token()
-        con.execute(f"UPDATE {table} SET file_token=? WHERE id=?", (ft, row_id))
-        changed = True
+        con.execute(f"UPDATE {table} SET file_token=? WHERE id=?", (ft, row_id)); changed = True
     if email_exists and not et:
         et = gen_token()
-        con.execute(f"UPDATE {table} SET email_token=? WHERE id=?", (et, row_id))
-        changed = True
+        con.execute(f"UPDATE {table} SET email_token=? WHERE id=?", (et, row_id)); changed = True
     if changed:
-        con.commit()
-        backup_db_to_dropbox()
+        con.commit(); backup_db_to_dropbox()
     return ft, et
-
-def open_in_new_tab_link(token, label):
-    href = f"/?serve={token}"
-    st.markdown(f'<a href="{href}" target="_blank">{label}</a>', unsafe_allow_html=True)
 
 def make_zip(refs: list) -> bytes:
     buf = BytesIO()
@@ -295,7 +392,7 @@ def _days_to_expiry(end_series):
     return (end_dt - today_ts).dt.days
 
 # ===================================================================
-#                               SERVE MODE (audit VIEW)
+#                               SERVE MODE
 # ===================================================================
 if "serve" in st.query_params:
     token = st.query_params["serve"]
@@ -329,9 +426,7 @@ if "serve" in st.query_params:
 
     st.markdown(f"### {name}")
 
-    # ---- Robust PDF display: object/embed (works better than iframe in some Chrome builds)
     if name.lower().endswith(".pdf") and data:
-        # Try inline up to 30 MB
         if len(data) <= 30_000_000:
             b64 = base64.b64encode(data).decode()
             html = f"""
@@ -339,21 +434,15 @@ if "serve" in st.query_params:
                     type="application/pdf" width="100%" height="820">
               <embed src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
                      type="application/pdf" />
-              <p style="font:14px/1.4 -apple-system,Segoe UI,Roboto,Helvetica,Arial">
-                PDF preview failed to load here.
-                <a href="data:application/pdf;base64,{b64}" download="{name}">Download the file</a>.
-              </p>
+              <p>PDF preview failed. <a href="data:application/pdf;base64,{b64}" download="{name}">Download</a>.</p>
             </object>
             """
             st.components.v1.html(html, height=840, scrolling=False)
-            st.caption("If the preview looks blank, use the Download button below.")
         else:
-            st.info("Large PDF — preview disabled to keep the page responsive. Use Download below.")
-
+            st.info("Large PDF — preview disabled. Use Download below.")
         st.download_button("⬇️ Download", data, name, mime or "application/pdf")
         st.stop()
 
-    # ---- Images / txt / other
     if name.lower().endswith((".png", ".jpg", ".jpeg")) and data:
         st.image(data, use_container_width=True)
     elif name.lower().endswith(".txt") and data:
@@ -364,7 +453,7 @@ if "serve" in st.query_params:
     st.stop()
 
 # ===================================================================
-#                               PAGES
+#                                PAGES
 # ===================================================================
 def page_upload(con, user):
     if user["role"] not in {"admin", "editor"}:
@@ -410,8 +499,8 @@ def page_upload(con, user):
             ),
         )
         con.commit()
-        details = f"Uploaded {doc_type}/{name} v{version}; approved_by='{approved_by}'; remarks='{remarks.strip()}'"
-        insert_audit(con, user["username"], "UPLOAD", details=details)
+        insert_audit(con, user["username"], "UPLOAD",
+                     details=f"Uploaded {doc_type}/{name} v{version}; approved_by='{approved_by}'; remarks='{remarks.strip()}'")
         backup_db_to_dropbox()
         st.success(f"Uploaded as version {version}")
 
@@ -442,7 +531,7 @@ def page_documents(con, user):
 
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
 
-    # Contracts visible here as a type
+    # Contracts appear here as "Contract"
     c = pd.read_sql(
         """SELECT id, 'Contract' AS doc_type, name,
                   start_date AS created_date, upload_date,
@@ -450,6 +539,7 @@ def page_documents(con, user):
            FROM contracts WHERE is_deleted=0""",
         con
     )
+
     d = docs[["id","doc_type","name","created_date","upload_date","approved_by",
               "uploaded_by","version","remarks"]].copy()
     d["vendor"] = ""
@@ -461,17 +551,18 @@ def page_documents(con, user):
     col1, col2, col3 = st.columns(3)
     with col1: t = st.selectbox("Type", ["All"] + sorted(f["doc_type"].unique().tolist()), key="docs_filter_type")
     with col2: name_q = st.text_input("Search name", key="docs_filter_name")
-    with col3: appr_q = st.text_input("Approved by / Vendor", key="docs_filter_appr")
+    with col3: apr_vendor_q = st.text_input("Approved by / Vendor", key="docs_filter_appr")
 
     g = f.copy()
     if t != "All": g = g[g["doc_type"] == t]
     if name_q:     g = g[g["name"].str.contains(name_q, case=False, na=False)]
-    if appr_q:     g = g[g["approved_by"].str.contains(appr_q, case=False, na=False)]
+    if apr_vendor_q:
+        g = g[g["approved_by"].str.contains(apr_vendor_q, case=False, na=False)]
 
     if g.empty:
         st.info("No matching documents"); return
 
-    g["version"] = g["version"].astype(int)
+    g["version"] = pd.to_numeric(g["version"], errors="coerce").fillna(0).astype(int)
     latest_flags = g.groupby(["doc_type", "name"])["version"].transform("max")
     g["is_latest"] = g["version"] == latest_flags
 
@@ -481,7 +572,6 @@ def page_documents(con, user):
         use_container_width=True
     )
 
-    # Open a group
     st.markdown("---")
     st.markdown("### Open a document group")
     groups = g.drop_duplicates(subset=["doc_type", "name", "vendor"])
@@ -525,29 +615,13 @@ def page_documents(con, user):
             }
         )
 
-    if user["role"] == "admin" and sel_group["doc_type"] != "Contract":
-        choice = st.selectbox(
-            "Select version to delete",
-            [f"v{r.version}" for r in versions.itertuples()],
-            key=f"doc_delete_choice_{sel_group['doc_type']}_{sel_group['name']}"
-        )
-        sel = versions.iloc[[f"v{r.version}" for r in versions.itertuples()].index(choice)]
-        if st.button("Delete this version", key=f"doc_delete_btn_{sel_group['doc_type']}_{sel_group['name']}"):
-            con.execute("UPDATE documents SET is_deleted=1 WHERE id=?", (int(sel["id"]),))
-            con.commit()
-            insert_audit(con, user["username"], "DELETE", sel["id"],
-                         f"Deleted {sel['doc_type']}/{sel['name']} v{sel['version']}")
-            backup_db_to_dropbox()
-            st.success("Deleted"); st.rerun()
-
 def page_deleted(con, user):
     st.subheader("Deleted Versions")
     df = pd.read_sql("SELECT * FROM documents WHERE is_deleted=1", con)
     if df.empty:
         st.info("None"); return
     st.dataframe(df[["id", "doc_type", "name", "version", "uploaded_by", "remarks"]], use_container_width=True)
-    if user["role"] != "admin":
-        return
+    if user["role"] != "admin": return
     sel = st.selectbox("Restore ID", df["id"], key="docs_restore_id")
     if st.button("Restore", key="docs_restore_btn"):
         con.execute("UPDATE documents SET is_deleted=0 WHERE id=?", (sel,))
@@ -635,7 +709,7 @@ def page_contracts(con, user):
     if f.empty:
         st.info("No matching contracts"); return
 
-    f["version"] = f["version"].astype(int)
+    f["version"] = pd.to_numeric(f["version"], errors="coerce").fillna(0).astype(int)
     latest_flags = f.groupby(["vendor", "name"])["version"].transform("max")
     f["is_latest"] = f["version"] == latest_flags
 
@@ -665,22 +739,6 @@ def page_contracts(con, user):
                     "View (email)": st.column_config.LinkColumn("View (email)")
                 }
             )
-
-            if user["role"] == "admin":
-                choice = st.selectbox(
-                    "Select version to delete",
-                    [f"v{r.version}" for r in versions.itertuples()],
-                    key=f"contracts_delete_choice_{sel_group['vendor']}_{sel_group['name']}"
-                )
-                sel = versions.iloc[[f"v{r.version}" for r in versions.itertuples()].index(choice)]
-                if st.button("Delete this version",
-                             key=f"contracts_delete_btn_{sel_group['vendor']}_{sel_group['name']}"):
-                    con.execute("UPDATE contracts SET is_deleted=1 WHERE id=?", (int(sel["id"]),))
-                    con.commit()
-                    insert_audit(con, user["username"], "CONTRACT_DELETE", sel["id"],
-                                 f"Deleted {sel['vendor']}/{sel['name']} v{sel['version']}")
-                    backup_db_to_dropbox()
-                    st.success("Deleted"); st.rerun()
 
 # ---------------- Audit & Users ----------------
 def page_audit(con, user=None):
@@ -743,9 +801,18 @@ def main():
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
 
+    # ---------- Auto-login via ?auth= token ----------
+    qp = st.experimental_get_query_params()
+    token_param = qp.get("auth", [None])[0]
+    if not st.session_state.get("user") and token_param:
+        user_from_token = validate_auth_token(con, token_param)
+        if user_from_token:
+            st.session_state["user"] = user_from_token
+
     user = st.session_state.get("user")
     if not user:
         st.title(APP_TITLE)
+        keep = st.checkbox("Keep me signed in on this device", value=True, help="Saves a 30-day token in the URL")
         u = st.text_input("Email")
         p = st.text_input("Password", type="password")
         if st.button("Login"):
@@ -753,6 +820,11 @@ def main():
             if auth:
                 st.session_state["user"] = auth
                 insert_audit(con, u, "LOGIN")
+                if keep:
+                    tok = new_auth_token(con, auth["username"], days=30)
+                    qp = st.experimental_get_query_params()
+                    qp["auth"] = tok
+                    st.experimental_set_query_params(**qp)
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -760,6 +832,11 @@ def main():
     else:
         st.sidebar.write(f"Signed in as {user['username']} ({user['role']})")
         if st.sidebar.button("Logout"):
+            qp = st.experimental_get_query_params()
+            tok = qp.get("auth", [None])[0]
+            if tok: delete_auth_token(con, tok)
+            qp.pop("auth", None)
+            st.experimental_set_query_params(**qp)
             insert_audit(con, user["username"], "LOGOUT")
             st.session_state.pop("user")
             st.rerun()
