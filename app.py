@@ -204,7 +204,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             doc_type TEXT,
-            Name TEXT,
+            name TEXT,
             created_date TEXT,
             upload_date TEXT,
             approved_by TEXT,
@@ -536,7 +536,7 @@ def page_documents(con, user):
         con
     )
 
-    d = docs[["id","doc_type","name","created_date","upload_date","approved_by",
+    d = docs[["id","doc_type","Name","created_date","upload_date","approved_by",
               "uploaded_by","version","remarks"]].copy()
     d["vendor"] = ""
     f = pd.concat([d, c], ignore_index=True)
