@@ -3,7 +3,7 @@
 # HR Document Portal — Streamlit + (optional) Dropbox persistence
 # Admin-managed users + mandatory remarks + full audit logging
 # Adds: Contract Management (upload, browse, versioning, audit)
-# Contracts are also shown in "Documents" by default.
+# Contracts are also shown in "Documents" for all roles.
 # ------------------------------------------------------------------
 
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
@@ -434,11 +434,11 @@ def page_documents(con, user):
     if f.empty:
         st.info("No documents available"); return
 
-    # Filters
+    # Filters (unique keys)
     col1, col2, col3 = st.columns(3)
-    with col1: t = st.selectbox("Type", ["All"] + sorted(f["doc_type"].unique().tolist()))
-    with col2: name_q = st.text_input("Search name")
-    with col3: appr_q = st.text_input("Approved by / Vendor")
+    with col1: t = st.selectbox("Type", ["All"] + sorted(f["doc_type"].unique().tolist()), key="docs_filter_type")
+    with col2: name_q = st.text_input("Search name", key="docs_filter_name")
+    with col3: appr_q = st.text_input("Approved by / Vendor", key="docs_filter_appr")
 
     g = f.copy()
     if t != "All": g = g[g["doc_type"] == t]
@@ -465,7 +465,7 @@ def page_documents(con, user):
     labels = [f"{r.doc_type} — {r.name}" for r in groups.itertuples()]
     if not labels: return
 
-    pick = st.selectbox("Select document", labels)
+    pick = st.selectbox("Select document", labels, key="docs_group_pick")
     if not pick: return
     sel_group = groups.iloc[labels.index(pick)]
 
@@ -477,6 +477,14 @@ def page_documents(con, user):
         v_table = versions_with_links_contracts(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","status",
                           "start_date","end_date","remarks","View (doc)","View (email)"]]
+        st.data_editor(
+            v_show, use_container_width=True, disabled=True,
+            key=f"contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
+            column_config={
+                "View (doc)": st.column_config.LinkColumn("View (doc)"),
+                "View (email)": st.column_config.LinkColumn("View (email)")
+            }
+        )
     else:
         versions = pd.read_sql(
             "SELECT * FROM documents WHERE doc_type=? AND name=? AND is_deleted=0 ORDER BY version DESC",
@@ -485,14 +493,30 @@ def page_documents(con, user):
         v_table = versions_with_links(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","approved_by",
                           "is_latest","remarks","View (doc)","View (email)"]]
+        st.data_editor(
+            v_show, use_container_width=True, disabled=True,
+            key=f"docs_versions_{sel_group['doc_type']}_{sel_group['name']}",
+            column_config={
+                "View (doc)": st.column_config.LinkColumn("View (doc)"),
+                "View (email)": st.column_config.LinkColumn("View (email)")
+            }
+        )
 
-    st.data_editor(
-        v_show, use_container_width=True, disabled=True,
-        column_config={
-            "View (doc)": st.column_config.LinkColumn("View (doc)"),
-            "View (email)": st.column_config.LinkColumn("View (email)")
-        }
-    )
+    # Delete selected version (admin only) – unique keys
+    if user["role"] == "admin" and sel_group["doc_type"] != "Contract":
+        choice = st.selectbox(
+            "Select version to delete",
+            [f"v{r.version}" for r in versions.itertuples()],
+            key=f"doc_delete_choice_{sel_group['doc_type']}_{sel_group['name']}"
+        )
+        sel = versions.iloc[[f"v{r.version}" for r in versions.itertuples()].index(choice)]
+        if st.button("Delete this version", key=f"doc_delete_btn_{sel_group['doc_type']}_{sel_group['name']}"):
+            con.execute("UPDATE documents SET is_deleted=1 WHERE id=?", (int(sel["id"]),))
+            con.commit()
+            insert_audit(con, user["username"], "DELETE", sel["id"],
+                         f"Deleted {sel['doc_type']}/{sel['name']} v{sel['version']}")
+            backup_db_to_dropbox()
+            st.success("Deleted"); st.rerun()
 
 def page_deleted(con, user):
     st.subheader("Deleted Versions")
@@ -502,8 +526,8 @@ def page_deleted(con, user):
     st.dataframe(df[["id", "doc_type", "name", "version", "uploaded_by", "remarks"]], use_container_width=True)
     if user["role"] != "admin":
         return
-    sel = st.selectbox("Restore ID", df["id"])
-    if st.button("Restore"):
+    sel = st.selectbox("Restore ID", df["id"], key="docs_restore_id")
+    if st.button("Restore", key="docs_restore_btn"):
         con.execute("UPDATE documents SET is_deleted=0 WHERE id=?", (sel,))
         con.commit()
         insert_audit(con, user["username"], "RESTORE", sel, f"Restored id={sel}")
@@ -583,14 +607,15 @@ def page_contracts(con, user):
     if df.empty:
         st.info("No contracts yet."); return
 
-    # Robust days-to-expiry (fix for AttributeError)
+    # Days to expiry (robust)
     df["days_to_expiry"] = _days_to_expiry(df["end_date"])
 
     c1, c2, c3, c4 = st.columns(4)
-    with c1: v_q = st.text_input("Search vendor")
-    with c2: o_q = st.text_input("Search owner")
-    with c3: s_q = st.selectbox("Status", ["All", "Active", "Under review", "Terminated", "Expired"])
-    with c4: exp_days = st.selectbox("Expiring in", ["All", 30, 60, 90])
+    with c1: v_q = st.text_input("Search vendor", key="contracts_filter_vendor")
+    with c2: o_q = st.text_input("Search owner", key="contracts_filter_owner")
+    with c3: s_q = st.selectbox("Status", ["All", "Active", "Under review", "Terminated", "Expired"],
+                                key="contracts_filter_status")
+    with c4: exp_days = st.selectbox("Expiring in", ["All", 30, 60, 90], key="contracts_filter_exp")
 
     f = df.copy()
     if v_q: f = f[f["vendor"].str.contains(v_q, case=False, na=False)]
@@ -607,7 +632,8 @@ def page_contracts(con, user):
     f["is_latest"] = f["version"] == latest_flags
 
     st.dataframe(
-        f[["vendor","name","status","start_date","end_date","days_to_expiry","version","is_latest","uploaded_by","remarks"]],
+        f[["vendor","name","status","start_date","end_date","days_to_expiry",
+           "version","is_latest","uploaded_by","remarks"]],
         use_container_width=True
     )
 
@@ -616,26 +642,33 @@ def page_contracts(con, user):
     groups = f.drop_duplicates(subset=["vendor","name"])
     labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
     if labels:
-        pick = st.selectbox("Select contract", labels)
+        pick = st.selectbox("Select contract", labels, key="contracts_group_pick")
         if pick:
             sel_group = groups.iloc[labels.index(pick)]
             versions = f[(f["vendor"] == sel_group["vendor"]) & (f["name"] == sel_group["name"])]\
                 .sort_values("version", ascending=False)
             v_table = versions_with_links_contracts(con, versions)
-            v_show = v_table[["version","upload_date","uploaded_by","status","start_date","end_date","remarks","View (doc)","View (email)"]]
+            v_show = v_table[["version","upload_date","uploaded_by","status",
+                              "start_date","end_date","remarks","View (doc)","View (email)"]]
             st.data_editor(
                 v_show, use_container_width=True, disabled=True,
+                key=f"contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
                 column_config={
                     "View (doc)": st.column_config.LinkColumn("View (doc)"),
                     "View (email)": st.column_config.LinkColumn("View (email)")
                 }
             )
 
-            # Delete (admin only)
+            # Delete (admin only) – unique keys
             if user["role"] == "admin":
-                choice = st.selectbox("Select version to delete", [f"v{r.version}" for r in versions.itertuples()])
+                choice = st.selectbox(
+                    "Select version to delete",
+                    [f"v{r.version}" for r in versions.itertuples()],
+                    key=f"contracts_delete_choice_{sel_group['vendor']}_{sel_group['name']}"
+                )
                 sel = versions.iloc[[f"v{r.version}" for r in versions.itertuples()].index(choice)]
-                if st.button("Delete this version"):
+                if st.button("Delete this version",
+                             key=f"contracts_delete_btn_{sel_group['vendor']}_{sel_group['name']}"):
                     con.execute("UPDATE contracts SET is_deleted=1 WHERE id=?", (int(sel["id"]),))
                     con.commit()
                     insert_audit(con, user["username"], "CONTRACT_DELETE", sel["id"],
@@ -652,13 +685,66 @@ def page_contracts(con, user):
                 st.info("None")
             else:
                 st.dataframe(d[["id","vendor","name","version","uploaded_by","remarks"]], use_container_width=True)
-                sel = st.selectbox("Restore contract ID", d["id"]) if not d.empty else None
-                if sel and st.button("Restore selected contract"):
+                sel = st.selectbox("Restore contract ID", d["id"], key="contracts_restore_id")
+                if st.button("Restore selected contract", key="contracts_restore_btn"):
                     con.execute("UPDATE contracts SET is_deleted=0 WHERE id=?", (sel,))
                     con.commit()
                     insert_audit(con, user["username"], "CONTRACT_RESTORE", sel, f"Restored id={sel}")
                     backup_db_to_dropbox()
                     st.success("Restored"); st.rerun()
+
+# ---------------- Audit & Users ----------------
+def page_audit(con, user=None):
+    st.subheader("Audit Log")
+    df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
+    if df.empty:
+        st.info("No logs"); return
+    st.download_button("⬇️ Export CSV", df.to_csv(index=False).encode(), "audit.csv")
+    buf = BytesIO(); df.to_excel(buf, index=False)
+    st.download_button("⬇️ Export Excel", buf.getvalue(), "audit.xlsx")
+    st.dataframe(df, use_container_width=True)
+
+def page_manage_users(con, user):
+    if user["role"] != "admin":
+        st.error("Access denied"); return
+
+    st.subheader("Manage Users")
+    with st.form("add_user", clear_on_submit=True):
+        email = st.text_input("User Email")
+        pwd = st.text_input("Password", type="password")
+        role = st.selectbox("Role", ["admin", "editor", "viewer"])
+        ok = st.form_submit_button("Add User")
+    if ok:
+        if not email or not pwd:
+            st.error("Email and Password are required.")
+        else:
+            try:
+                con.execute(
+                    "INSERT INTO users (email,password_sha256,role,created_date) VALUES (?,?,?,?)",
+                    (email.strip().lower(), _hash(pwd), role, dt.datetime.utcnow().isoformat()),
+                )
+                con.commit()
+                insert_audit(con, user["username"], "ADD_USER", details=f"{email.strip().lower()} as {role}")
+                backup_db_to_dropbox()
+                st.success(f"User {email} added as {role}")
+            except sqlite3.IntegrityError:
+                st.error("User already exists")
+
+    df = pd.read_sql("SELECT id,email,role,created_date FROM users ORDER BY id DESC", con)
+    st.dataframe(df, use_container_width=True)
+
+    if not df.empty:
+        del_id = st.selectbox("Delete user ID", df["id"])
+        if st.button("Delete User"):
+            target_email = df[df["id"] == del_id]["email"].iloc[0]
+            if target_email == user["username"]:
+                st.error("You cannot delete yourself.")
+            else:
+                con.execute("DELETE FROM users WHERE id=?", (del_id,))
+                con.commit()
+                insert_audit(con, user["username"], "DELETE_USER", details=str(target_email))
+                backup_db_to_dropbox()
+                st.success("User deleted"); st.rerun()
 
 # ===================================================================
 #                                MAIN
@@ -713,59 +799,6 @@ def main():
         if "Manage Users" in tabs:
             with t[tabs.index("Manage Users")]:
                 page_manage_users(con, user)
-
-# ---------------- Manage Users & Audit ----------------
-def page_audit(con, user=None):
-    st.subheader("Audit Log")
-    df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
-    if df.empty:
-        st.info("No logs"); return
-    st.download_button("⬇️ Export CSV", df.to_csv(index=False).encode(), "audit.csv")
-    buf = BytesIO(); df.to_excel(buf, index=False)
-    st.download_button("⬇️ Export Excel", buf.getvalue(), "audit.xlsx")
-    st.dataframe(df, use_container_width=True)
-
-def page_manage_users(con, user):
-    if user["role"] != "admin":
-        st.error("Access denied"); return
-
-    st.subheader("Manage Users")
-    with st.form("add_user", clear_on_submit=True):
-        email = st.text_input("User Email")
-        pwd = st.text_input("Password", type="password")
-        role = st.selectbox("Role", ["admin", "editor", "viewer"])
-        ok = st.form_submit_button("Add User")
-    if ok:
-        if not email or not pwd:
-            st.error("Email and Password are required.")
-        else:
-            try:
-                con.execute(
-                    "INSERT INTO users (email,password_sha256,role,created_date) VALUES (?,?,?,?)",
-                    (email.strip().lower(), _hash(pwd), role, dt.datetime.utcnow().isoformat()),
-                )
-                con.commit()
-                insert_audit(con, user["username"], "ADD_USER", details=f"{email.strip().lower()} as {role}")
-                backup_db_to_dropbox()
-                st.success(f"User {email} added as {role}")
-            except sqlite3.IntegrityError:
-                st.error("User already exists")
-
-    df = pd.read_sql("SELECT id,email,role,created_date FROM users ORDER BY id DESC", con)
-    st.dataframe(df, use_container_width=True)
-
-    if not df.empty:
-        del_id = st.selectbox("Delete user ID", df["id"])
-        if st.button("Delete User"):
-            target_email = df[df["id"] == del_id]["email"].iloc[0]
-            if target_email == user["username"]:
-                st.error("You cannot delete yourself.")
-            else:
-                con.execute("DELETE FROM users WHERE id=?", (del_id,))
-                con.commit()
-                insert_audit(con, user["username"], "DELETE_USER", details=str(target_email))
-                backup_db_to_dropbox()
-                st.success("User deleted"); st.rerun()
 
 if __name__ == "__main__":
     main()
