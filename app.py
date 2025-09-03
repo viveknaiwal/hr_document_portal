@@ -569,7 +569,7 @@ def page_documents(con, user):
     )
 
     st.markdown("---")
-    st.markdown("### Open a document group")
+    st.markdown("### Document versions")
     groups = g.drop_duplicates(subset=["doc_type", "name", "vendor"])
     labels = [f"{r.doc_type} — {r.name}" for r in groups.itertuples()]
     if not labels: return
