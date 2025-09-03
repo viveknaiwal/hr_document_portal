@@ -326,12 +326,35 @@ if "serve" in st.query_params:
     data = read_ref_bytes(target_ref)
     name = to_display_name(target_ref)
     mime, _ = mimetypes.guess_type(name)
+
     st.markdown(f"### {name}")
-    if name.lower().endswith(".pdf") and data and len(data) < 15_000_000:
-        b64 = base64.b64encode(data).decode()
-        st.markdown(f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="700"></iframe>',
-                    unsafe_allow_html=True)
-    elif name.lower().endswith((".png", ".jpg", ".jpeg")) and data:
+
+    # ---- Robust PDF display: object/embed (works better than iframe in some Chrome builds)
+    if name.lower().endswith(".pdf") and data:
+        # Try inline up to 30 MB
+        if len(data) <= 30_000_000:
+            b64 = base64.b64encode(data).decode()
+            html = f"""
+            <object data="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
+                    type="application/pdf" width="100%" height="820">
+              <embed src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
+                     type="application/pdf" />
+              <p style="font:14px/1.4 -apple-system,Segoe UI,Roboto,Helvetica,Arial">
+                PDF preview failed to load here.
+                <a href="data:application/pdf;base64,{b64}" download="{name}">Download the file</a>.
+              </p>
+            </object>
+            """
+            st.components.v1.html(html, height=840, scrolling=False)
+            st.caption("If the preview looks blank, use the Download button below.")
+        else:
+            st.info("Large PDF — preview disabled to keep the page responsive. Use Download below.")
+
+        st.download_button("⬇️ Download", data, name, mime or "application/pdf")
+        st.stop()
+
+    # ---- Images / txt / other
+    if name.lower().endswith((".png", ".jpg", ".jpeg")) and data:
         st.image(data, use_container_width=True)
     elif name.lower().endswith(".txt") and data:
         st.text(data.decode(errors="replace")[:5000])
@@ -477,7 +500,6 @@ def page_documents(con, user):
         v_table = versions_with_links_contracts(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","status",
                           "start_date","end_date","remarks","View (doc)","View (email)"]]
-        # NOTE: unique key prefix here to avoid collision with the Contracts tab
         st.data_editor(
             v_show, use_container_width=True, disabled=True,
             key=f"docs_contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
@@ -538,7 +560,6 @@ def page_deleted(con, user):
 def page_contracts(con, user):
     st.subheader("Contract Management")
 
-    # Upload (admin/editor)
     can_upload = user["role"] in {"admin", "editor"}
     if can_upload:
         with st.form("contract_form", clear_on_submit=True):
@@ -590,7 +611,6 @@ def page_contracts(con, user):
             backup_db_to_dropbox()
             st.success(f"Contract uploaded as version {version}")
 
-    # Browse / filter
     st.markdown("---")
     df = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
     if df.empty:
@@ -625,7 +645,6 @@ def page_contracts(con, user):
         use_container_width=True
     )
 
-    # Open a contract group
     st.markdown("### Open a contract group")
     groups = f.drop_duplicates(subset=["vendor","name"])
     labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
@@ -662,23 +681,6 @@ def page_contracts(con, user):
                                  f"Deleted {sel['vendor']}/{sel['name']} v{sel['version']}")
                     backup_db_to_dropbox()
                     st.success("Deleted"); st.rerun()
-
-    # Deleted contracts (admin)
-    st.markdown("---")
-    with st.expander("Deleted contract versions (admin)"):
-        if user["role"] == "admin":
-            d = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=1", con)
-            if d.empty:
-                st.info("None")
-            else:
-                st.dataframe(d[["id","vendor","name","version","uploaded_by","remarks"]], use_container_width=True)
-                sel = st.selectbox("Restore contract ID", d["id"], key="contracts_restore_id")
-                if st.button("Restore selected contract", key="contracts_restore_btn"):
-                    con.execute("UPDATE contracts SET is_deleted=0 WHERE id=?", (sel,))
-                    con.commit()
-                    insert_audit(con, user["username"], "CONTRACT_RESTORE", sel, f"Restored id={sel}")
-                    backup_db_to_dropbox()
-                    st.success("Restored"); st.rerun()
 
 # ---------------- Audit & Users ----------------
 def page_audit(con, user=None):
