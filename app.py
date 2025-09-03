@@ -790,6 +790,73 @@ def page_manage_users(con, user):
                 st.success("User deleted"); st.rerun()
 
 # ===================================================================
+#                         LOGIN UI (NEW)
+# ===================================================================
+def style_login():
+    """CSS for login card only. Tweak variables to change look."""
+    brand = "#1F4FFF"   # primary button color
+    ink   = "#0B2545"   # heading color
+    muted = "#64748B"   # subtle text
+    line  = "#E6EAF0"   # card border
+
+    st.markdown(f"""
+    <style>
+      .login-card {{
+        background:#fff; border:1px solid {line}; border-radius:16px;
+        padding:28px; box-shadow:0 6px 22px rgba(16,24,40,.06);
+      }}
+      .login-logo img {{ max-height:44px; width:auto; display:block; margin:0 auto 6px; }}
+      .login-title {{ margin:0; text-align:center; font-weight:800; font-size:24px; color:{ink}; }}
+      .login-sub   {{ text-align:center; color:{muted}; margin:6px 0 18px; font-size:13px; }}
+
+      /* round inputs */
+      .login-card .stTextInput>div>div>input,
+      .login-card .stPasswordInput>div>div>input,
+      .login-card .stCheckbox>div>label {{
+        border-radius:10px;
+      }}
+
+      /* full-width primary button (scoped to the card) */
+      .login-card .stButton>button {{
+        width:100%;
+        background:{brand}; color:#fff; border:0; border-radius:10px;
+        padding:12px 16px; font-size:15px; font-weight:700;
+        box-shadow:0 2px 6px rgba(16,24,40,.08);
+      }}
+      .login-card .stButton>button:hover {{ filter:brightness(.95); }}
+      .login-card .stButton>button:focus  {{ outline:2px solid rgba(31,79,255,.25); outline-offset:2px; }}
+    </style>
+    """, unsafe_allow_html=True)
+
+def login_view():
+    """Render login card and return (submitted, email, password, keep)."""
+    style_login()
+
+    # center the card
+    col_l, col_c, col_r = st.columns([1, 1, 1])
+    with col_c:
+        st.markdown("<div class='login-card'>", unsafe_allow_html=True)
+        try:
+            st.markdown("<div class='login-logo'>", unsafe_allow_html=True)
+            st.image("C24-logo.png")  # replace with your logo filename if different
+            st.markdown("</div>", unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        st.markdown("<h3 class='login-title'>HR Document Portal</h3>", unsafe_allow_html=True)
+        st.markdown("<div class='login-sub'>Secure access for HR and Admin users</div>", unsafe_allow_html=True)
+
+        # Use a form so Enter submits
+        with st.form("login_form", clear_on_submit=False):
+            u = st.text_input("Email", key="login_email")
+            p = st.text_input("Password", type="password", key="login_pwd")
+            keep = st.checkbox("Keep me signed in on this device", value=True)
+            submitted = st.form_submit_button("Login", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    return submitted, u, p, keep
+
+# ===================================================================
 #                                MAIN
 # ===================================================================
 def main():
@@ -806,11 +873,9 @@ def main():
 
     user = st.session_state.get("user")
     if not user:
-        st.title(APP_TITLE)
-        keep = st.checkbox("Keep me signed in on this device", value=True, help="Saves a 30-day token in the URL")
-        u = st.text_input("Email")
-        p = st.text_input("Password", type="password")
-        if st.button("Login"):
+        # Login page (only the UI changed)
+        submitted, u, p, keep = login_view()
+        if submitted:
             auth = authenticate(u, p, con)
             if auth:
                 st.session_state["user"] = auth
