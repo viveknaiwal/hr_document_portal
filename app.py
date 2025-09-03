@@ -880,7 +880,7 @@ def main():
         </style>
         """, unsafe_allow_html=True)
 
-        t = st.tabs(tabs)
+        
 
         t = st.tabs(tabs)
         with t[0]:
