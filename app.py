@@ -536,7 +536,7 @@ def page_documents(con, user):
         con
     )
 
-    d = docs[["id","doc_type","Name","created_date","upload_date","approved_by",
+    d = docs[["id","doc_type","name","created_date","upload_date","approved_by",
               "uploaded_by","version","remarks"]].copy()
     d["vendor"] = ""
     f = pd.concat([d, c], ignore_index=True)
