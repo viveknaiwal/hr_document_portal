@@ -16,6 +16,17 @@ import streamlit as st
 
 APP_TITLE = "HR Document Portal"
 
+import os
+
+# 🔵 Load CSS (Figma export)
+def load_css():
+    css_files = ["index.css", "globals.css"]
+    for css_file in css_files:
+        if os.path.exists(css_file):
+            with open(css_file) as f:
+                st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+
 # ---------------- Local storage (fallback when no cloud available)
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
 LOCAL_DB_PATH = Path("storage/hr_docs.db")
@@ -1033,6 +1044,9 @@ def handle_serve_mode():
 # ===================================================================
 def main():
     st.set_page_config(APP_TITLE, layout="wide")
+
+    # ✅ Apply Figma CSS styles
+    load_css()
 
     # If in serve mode, render file and stop
     if handle_serve_mode():
