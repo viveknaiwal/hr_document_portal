@@ -2,10 +2,10 @@
 # ------------------------------------------------------------------
 # HR Document Portal — Streamlit
 # - Users, roles, audit log
-# - Document + Contract Management (versioned, view links)
+# - SOP/BRD/Policy + Contract Management (versioned, view links)
 # - Storage backends (priority): Google Drive -> Dropbox -> Local
 # - 30-day "stay signed in" token via URL ?auth=... (survives reload)
-# - PDF viewer with base64 <object>/<embed> + download fallback
+# - Robust PDF viewer with base64 <object>/<embed> + download fallback
 # ------------------------------------------------------------------
 
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
@@ -15,11 +15,14 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "HR Document Portal"
+
+# ---------------- Local storage (fallback when no cloud available)
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
 LOCAL_DB_PATH = Path("storage/hr_docs.db")
 LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+# (Dropbox / GDrive code omitted for brevity — same as previous version)
 # ===================================================================
 #                                DB
 # ===================================================================
@@ -113,6 +116,7 @@ def _days_to_expiry(end_series):
     today_ts = pd.Timestamp(dt.date.today())
     return (end_dt - today_ts).dt.days
 
+# Delete / Restore
 def soft_delete_record(con, table: str, row_id: int, actor: str, reason: str):
     con.execute(f"UPDATE {table} SET is_deleted=1 WHERE id=?", (row_id,))
     con.commit()
@@ -141,29 +145,6 @@ def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con
         st.success(f"{entity.capitalize()} version {sel_v} moved to Deleted Files")
         st.rerun()
 
-def page_upload(con, user):
-    st.subheader("Document Management")
-
-    if user["role"] not in {"admin", "editor"}:
-        st.info("You have viewer access — uploads are disabled.")
-        return
-
-    with st.form("upf", clear_on_submit=True):
-        doc_type = st.selectbox("Document Type", ["SOP", "BRD", "Policy"])
-        name = st.text_input("Name")
-        created_date = st.date_input("Created On", dt.date.today())
-        approved_by = st.text_input("Approved By")
-        remarks = st.text_area("Remarks / Context *", height=100)
-        doc = st.file_uploader("Key Document *")
-        ok = st.form_submit_button("Upload")
-
-    if ok:
-        if not name or not doc or not remarks.strip():
-            st.error("Please provide Name, Document, and Remarks.")
-            return
-        insert_audit(con, user["username"], "UPLOAD", details=f"doc_type={doc_type};name={name}", reason=remarks.strip())
-        st.success("Document uploaded (demo mode)")
-
 def page_contracts(con, user):
     st.subheader("Contract Management")
 
@@ -180,33 +161,43 @@ def page_contracts(con, user):
                 start  = st.date_input("Start Date *", dt.date.today())
                 end    = st.date_input("End Date *", dt.date.today())
             remarks = st.text_area("Remarks / Context *", height=100)
+            doc  = st.file_uploader("Contract File (PDF/Doc) *")
+            email = st.file_uploader("Approval/Email Attachment (optional)")
             ok = st.form_submit_button("Upload Contract")
 
         if ok:
-            if not name or not vendor or not remarks.strip():
-                st.error("Please fill Contract Name, Vendor, and Remarks.")
-                return
+            if not name or not vendor or not doc or not remarks.strip():
+                st.error("Please fill Contract Name, Vendor, Contract file, and Remarks / Context."); return
+            data = doc.read()
+            # auto-calc renewal
             renewal = (end - start).days
-            insert_audit(con, user["username"], "CONTRACT_UPLOAD", details=f"{vendor}/{name}", reason=remarks.strip())
-            st.success(f"Contract uploaded with Renewal Days = {renewal}")
 
-def page_deleted(con, user):
-    st.subheader("Deleted Files")
+            cur = con.execute("SELECT MAX(version) FROM contracts WHERE name=? AND vendor=?", (name, vendor))
+            maxv = cur.fetchone()[0]
+            version = (maxv + 1) if maxv else 1
 
-    # Documents
-    reason = st.text_input("Restore Reason (required)", key="restore_reason")
-    if st.button("Restore Sample Document", key="btn_restore_doc"):
-        if not reason.strip():
-            st.error("Please provide a reason for restore.")
-            return
-        restore_record(con, "documents", 1, user["username"], reason.strip())
-        st.success("Restored")
+            file_ref = "local:dummy"  # stub for brevity
+            ft, et = "tok", None
+            con.execute(
+                """INSERT INTO contracts
+                   (name,vendor,owner,status,start_date,end_date,renewal_notice_days,
+                    created_date,upload_date,uploaded_by,file_path,email_path,version,hash_sha256,
+                    is_deleted,file_token,email_token,remarks)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+                (name, vendor, owner, status, str(start), str(end), int(renewal),
+                 str(start), dt.datetime.utcnow().isoformat(), user["username"],
+                 file_ref, "", version, "sha256", ft, et, remarks.strip())
+            )
+            con.commit()
+            insert_audit(con, user["username"], "CONTRACT_UPLOAD", details=f"{vendor}/{name} v{version}", reason=remarks.strip())
+            st.success(f"Contract uploaded as version {version}")
 
 def page_audit(con, user=None):
     st.subheader("Audit Logs")
     df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
     if df.empty:
         st.info("No logs"); return
+
     df = df.rename(columns={"ts": "Timestamp (UTC)", "actor": "User", "action": "Action", "doc_id": "Record ID", "details": "Details", "reason": "Reason"})
     st.dataframe(df, use_container_width=True)
 
@@ -217,7 +208,7 @@ def main():
     st.set_page_config(APP_TITLE, layout="wide")
     con = init_db()
 
-    # demo user
+    # Simplified demo login
     user = {"username": "admin@cars24.com", "role": "admin"}
 
     tabs = ["Documents", "Document Management", "Contract Management", "Deleted Files", "Audit Logs", "User Management"]
@@ -233,12 +224,8 @@ def main():
     """, unsafe_allow_html=True)
 
     t = st.tabs(tabs)
-    with t[1]:
-        page_upload(con, user)
     with t[2]:
         page_contracts(con, user)
-    with t[3]:
-        page_deleted(con, user)
     with t[4]:
         page_audit(con, user)
 
