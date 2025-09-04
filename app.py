@@ -20,21 +20,8 @@ import os
 
 # 🔵 Load CSS (Figma export)
 def load_css():
-    css_files = ["index.css", "globals.css"]
-    for css_file in css_files:
-        if os.path.exists(css_file):
-            with open(css_file) as f:
-                css_content = f.read()
-                # Wrap in stronger selectors so it overrides Streamlit defaults
-                wrapped_css = f"""
-                <style>
-                [data-testid="stApp"], body {{
-                    all: unset;
-                }}
-                {css_content}
-                </style>
-                """
-                st.markdown(wrapped_css, unsafe_allow_html=True)
+    with open("style.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 # ---------------- Local storage (fallback when no cloud available)
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
