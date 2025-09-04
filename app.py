@@ -160,7 +160,7 @@ def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: in
         remote_file = remote_dir + "/" + filename
         dbx_upload_bytes(remote_file, data)
         return "dbx:" + remote_file
-    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"
+    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"]
     subdir.mkdir(parents=True, exist_ok=True)
     local_file = subdir / filename
     local_file.write_bytes(data)
@@ -394,6 +394,28 @@ def _days_to_expiry(end_series):
     today_ts = pd.Timestamp(dt.date.today())
     return (end_dt - today_ts).dt.days
 
+def soft_delete_record(con, table: str, row_id: int, actor: str, reason: str = ""):
+    con.execute(f"UPDATE {table} SET is_deleted=1 WHERE id=?", (row_id,))
+    con.commit()
+    action = "DELETE_CONTRACT" if table == "contracts" else "DELETE_DOC"
+    insert_audit(con, actor, action, row_id, details=f"table={table};id={row_id};reason={reason}")
+    backup_db_to_dropbox()
+
+def restore_record(con, table: str, row_id: int, actor: str):
+    con.execute(f"UPDATE {table} SET is_deleted=0 WHERE id=?", (row_id,))
+    con.commit()
+    action = "RESTORE_CONTRACT" if table == "contracts" else "RESTORE_DOC"
+    insert_audit(con, actor, action, row_id, details=f"table={table};id={row_id}")
+    backup_db_to_dropbox()
+
+def last_delete_info(con, table: str, row_id: int):
+    act = "DELETE_CONTRACT" if table == "contracts" else "DELETE_DOC"
+    row = con.execute(
+        "SELECT actor, ts FROM audit_log WHERE action=? AND doc_id=? ORDER BY ts DESC LIMIT 1",
+        (act, row_id)
+    ).fetchone()
+    return row if row else ("", "")
+
 # ===================================================================
 #                               SERVE MODE
 # ===================================================================
@@ -585,6 +607,7 @@ def page_documents(con, user):
     if not pick: return
     sel_group = groups.iloc[labels.index(pick)]
 
+    # -------- CONTRACTS branch --------
     if sel_group["doc_type"] == "Contract":
         versions = pd.read_sql(
             "SELECT * FROM contracts WHERE name=? AND vendor=? AND is_deleted=0 ORDER BY version DESC",
@@ -601,6 +624,21 @@ def page_documents(con, user):
                 "View (email)": st.column_config.LinkColumn("View (email)")
             }
         )
+
+        if user["role"] in {"admin", "editor"} and not versions.empty:
+            st.markdown("#### Delete")
+            del_col1, del_col2 = st.columns([2,1])
+            with del_col1:
+                sel_v = st.selectbox("Version to delete", versions["version"].tolist(), key="del_contract_v")
+                reason = st.text_input("Reason (optional)", key="del_contract_reason")
+            with del_col2:
+                if st.button("Delete version", key="btn_del_contract"):
+                    row_id = int(versions.loc[versions["version"] == sel_v, "id"].iloc[0])
+                    soft_delete_record(con, "contracts", row_id, user["username"], reason)
+                    st.success(f"Contract version {sel_v} moved to Deleted")
+                    st.rerun()
+
+    # -------- DOCUMENTS branch --------
     else:
         versions = pd.read_sql(
             "SELECT * FROM documents WHERE doc_type=? AND name=? AND is_deleted=0 ORDER BY version DESC",
@@ -618,135 +656,62 @@ def page_documents(con, user):
             }
         )
 
+        if user["role"] in {"admin", "editor"} and not versions.empty:
+            st.markdown("#### Delete")
+            del_col1, del_col2 = st.columns([2,1])
+            with del_col1:
+                sel_v = st.selectbox("Version to delete", versions["version"].tolist(), key="del_doc_v")
+                reason = st.text_input("Reason (optional)", key="del_doc_reason")
+            with del_col2:
+                if st.button("Delete version", key="btn_del_doc"):
+                    row_id = int(versions.loc[versions["version"] == sel_v, "id"].iloc[0])
+                    soft_delete_record(con, "documents", row_id, user["username"], reason)
+                    st.success(f"Document version {sel_v} moved to Deleted")
+                    st.rerun()
+
 def page_deleted(con, user):
-    st.subheader("Deleted Versions")
-    df = pd.read_sql("SELECT * FROM documents WHERE is_deleted=1", con)
-    if df.empty:
-        st.info("None"); return
-    st.dataframe(df[["id", "doc_type", "name", "version", "uploaded_by", "remarks"]], use_container_width=True)
-    if user["role"] != "admin": return
-    sel = st.selectbox("Restore ID", df["id"], key="docs_restore_id")
-    if st.button("Restore", key="docs_restore_btn"):
-        con.execute("UPDATE documents SET is_deleted=0 WHERE id=?", (sel,))
-        con.commit()
-        insert_audit(con, user["username"], "RESTORE", sel, f"Restored id={sel}")
-        backup_db_to_dropbox()
-        st.success("Restored"); st.rerun()
+    st.subheader("Deleted")
 
-# -------------------- CONTRACTS PAGE --------------------
-def page_contracts(con, user):
-    st.subheader("Contract Management")
+    tab_docs, tab_contracts = st.tabs(["Documents", "Contracts"])
 
-    can_upload = user["role"] in {"admin", "editor"}
-    if can_upload:
-        with st.form("contract_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                name   = st.text_input("Contract Name *")
-                vendor = st.text_input("Vendor *")
-                owner  = st.text_input("Internal Owner / POC")
-                status = st.selectbox("Status", ["Active", "Under review", "Expired"])
-            with c2:
-                start  = st.date_input("Start date *", dt.date.today())
-                end    = st.date_input("End date *", dt.date.today())
-                renewal = st.number_input("Renewal notice (days)", min_value=0, value=60, step=5)
-            remarks = st.text_area("Remarks / Context *", height=100)
-            doc  = st.file_uploader("Contract file (PDF/Doc) *")
-            email = st.file_uploader("Approval/email attachment (optional)")
-            ok = st.form_submit_button("Upload contract")
+    with tab_docs:
+        df = pd.read_sql("SELECT * FROM documents WHERE is_deleted=1 ORDER BY upload_date DESC", con)
+        if df.empty:
+            st.info("No deleted documents."); 
+        else:
+            # who deleted + when
+            deleted_by, deleted_at = [], []
+            for rid in df["id"].tolist():
+                who, when = last_delete_info(con, "documents", int(rid))
+                deleted_by.append(who); deleted_at.append(when)
+            df["deleted_by"] = deleted_by
+            df["deleted_at"] = deleted_at
+            st.dataframe(df[["id","doc_type","name","version","uploaded_by","deleted_by","deleted_at","remarks"]],
+                         use_container_width=True)
+            if user["role"] == "admin":
+                sel = st.selectbox("Restore document ID", df["id"], key="docs_restore_id")
+                if st.button("Restore", key="docs_restore_btn"):
+                    restore_record(con, "documents", int(sel), user["username"])
+                    st.success("Restored"); st.rerun()
 
-        if ok:
-            if not name or not vendor or not doc or not remarks.strip():
-                st.error("Please fill Contract Name, Vendor, Contract file, and Remarks."); return
-            data = doc.read()
-
-            cur = con.execute("SELECT MAX(version) FROM contracts WHERE name=? AND vendor=?", (name, vendor))
-            maxv = cur.fetchone()[0]
-            version = (maxv + 1) if maxv else 1
-
-            file_ref = write_bytes_return_ref(data, doc_type="Contract", name=name, version=version, filename=doc.name)
-            email_ref = ""
-            if email:
-                email_ref = write_bytes_return_ref(email.read(), doc_type="Contract", name=name, version=version,
-                                                   filename="email_" + email.name)
-
-            ft, et = gen_token(), (gen_token() if email_ref else None)
-
-            con.execute(
-                """INSERT INTO contracts
-                   (name,vendor,owner,status,start_date,end_date,renewal_notice_days,
-                    created_date,upload_date,uploaded_by,file_path,email_path,version,hash_sha256,
-                    is_deleted,file_token,email_token,remarks)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
-                (name, vendor, owner, status, str(start), str(end), int(renewal),
-                 str(start), dt.datetime.utcnow().isoformat(), user["username"],
-                 file_ref, email_ref, version, sha256_bytes(data), ft, et, remarks.strip())
-            )
-            con.commit()
-            insert_audit(con, user["username"], "CONTRACT_UPLOAD",
-                         details=f"{vendor}/{name} v{version}; status={status}; start={start}; end={end}; remarks='{remarks.strip()}'")
-            backup_db_to_dropbox()
-            st.success(f"Contract uploaded as version {version}")
-
-    st.markdown("---")
-    df = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
-    if df.empty:
-        st.info("No contracts yet."); return
-
-    df["days_to_expiry"] = _days_to_expiry(df["end_date"])
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: v_q = st.text_input("Search vendor", key="contracts_filter_vendor")
-    with c2: o_q = st.text_input("Search owner", key="contracts_filter_owner")
-    with c3: s_q = st.selectbox("Status", ["All", "Active", "Under review", "Expired"],
-                                key="contracts_filter_status")
-    with c4: exp_days = st.selectbox("Expiring in", ["All", 30, 60, 90], key="contracts_filter_exp")
-
-    f = df.copy()
-    if v_q: f = f[f["vendor"].str.contains(v_q, case=False, na=False)]
-    if o_q: f = f[f["owner"].str.contains(o_q, case=False, na=False)]
-    if s_q != "All": f = f[f["status"] == s_q]
-    if exp_days != "All":
-        f = f[(f["days_to_expiry"] >= 0) & (f["days_to_expiry"] <= int(exp_days))]
-
-    if f.empty:
-        st.info("No matching contracts"); return
-
-    f["version"] = pd.to_numeric(f["version"], errors="coerce").fillna(0).astype(int)
-    latest_flags = f.groupby(["vendor", "name"])["version"].transform("max")
-    f["is_latest"] = f["version"] == latest_flags
-
-    st.dataframe(
-        f[["vendor","name","status","start_date","end_date","days_to_expiry",
-           "version","is_latest","uploaded_by","remarks"]],
-        use_container_width=True
-    )
-
-    st.markdown("### Contract versions")
-    groups = f.drop_duplicates(subset=["vendor","name"])
-    labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
-    if labels:
-        pick = st.selectbox("Select contract", labels, key="contracts_group_pick")
-        if pick:
-            sel_group = groups.iloc[labels.index(pick)]
-            versions = f[(f["vendor"] == sel_group["vendor"]) & (f["name"] == sel_group["name"])]\
-                .sort_values("version", ascending=False)
-            # fetch raw rows for refs
-            raw_versions = pd.read_sql(
-                "SELECT * FROM contracts WHERE vendor=? AND name=? AND is_deleted=0 ORDER BY version DESC",
-                con, params=(sel_group["vendor"], sel_group["name"])
-            )
-            v_table = versions_with_links_contracts(con, raw_versions)
-            v_show = v_table[["version","upload_date","uploaded_by","status",
-                              "start_date","end_date","remarks","View (doc)","View (email)"]]
-            st.data_editor(
-                v_show, use_container_width=True, disabled=True,
-                key=f"contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
-                column_config={
-                    "View (doc)": st.column_config.LinkColumn("View (doc)"),
-                    "View (email)": st.column_config.LinkColumn("View (email)")
-                }
-            )
+    with tab_contracts:
+        dfc = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=1 ORDER BY upload_date DESC", con)
+        if dfc.empty:
+            st.info("No deleted contracts.")
+        else:
+            deleted_by, deleted_at = [], []
+            for rid in dfc["id"].tolist():
+                who, when = last_delete_info(con, "contracts", int(rid))
+                deleted_by.append(who); deleted_at.append(when)
+            dfc["deleted_by"] = deleted_by
+            dfc["deleted_at"] = deleted_at
+            st.dataframe(dfc[["id","vendor","name","version","uploaded_by","deleted_by","deleted_at","remarks"]],
+                         use_container_width=True)
+            if user["role"] == "admin":
+                selc = st.selectbox("Restore contract ID", dfc["id"], key="contracts_restore_id")
+                if st.button("Restore contract", key="contracts_restore_btn"):
+                    restore_record(con, "contracts", int(selc), user["username"])
+                    st.success("Restored"); st.rerun()
 
 # ---------------- Audit & Users ----------------
 def page_audit(con, user=None):
@@ -754,10 +719,28 @@ def page_audit(con, user=None):
     df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
     if df.empty:
         st.info("No logs"); return
-    st.download_button("⬇️ Export CSV", df.to_csv(index=False).encode(), "audit.csv")
-    buf = BytesIO(); df.to_excel(buf, index=False)
+
+    col1, col2 = st.columns([2, 3])
+    with col1:
+        pick_actions = st.multiselect(
+            "Filter actions",
+            sorted(df["action"].unique().tolist()),
+            default=[]
+        )
+    with col2:
+        q = st.text_input("Search actor/details")
+
+    f = df.copy()
+    if pick_actions:
+        f = f[f["action"].isin(pick_actions)]
+    if q:
+        ql = q.lower()
+        f = f[f["actor"].str.lower().str.contains(ql) | f["details"].str.lower().str.contains(ql)]
+
+    st.download_button("⬇️ Export CSV", f.to_csv(index=False).encode(), "audit.csv")
+    buf = BytesIO(); f.to_excel(buf, index=False)
     st.download_button("⬇️ Export Excel", buf.getvalue(), "audit.xlsx")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(f, use_container_width=True)
 
 def page_manage_users(con, user):
     if user["role"] != "admin":
@@ -805,9 +788,7 @@ def page_manage_users(con, user):
 #                         LOGIN UI (NEW) — ONLY HEADER HIDDEN
 # ===================================================================
 def style_login():
-    """CSS scoped to the login page.
-    We only hide the Streamlit top header/upper bar here.
-    """
+    """CSS scoped to the login page."""
     st.markdown("""
     <style>
       header[data-testid="stHeader"] { display:none !important; }
@@ -818,7 +799,6 @@ def style_login():
 def login_view():
     """Render login form and return (submitted, email, password, keep)."""
     style_login()
-
     col_l, col_c, col_r = st.columns([1, 1, 1])
     with col_c:
         with st.form("login_form", clear_on_submit=False):
@@ -837,7 +817,7 @@ def main():
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
 
-    # ---------- Auto-login via ?auth= token ----------
+    # Auto-login via ?auth=
     token_param = st.query_params.get("auth", None)
     if not st.session_state.get("user") and token_param:
         user_from_token = validate_auth_token(con, token_param)
@@ -870,7 +850,6 @@ def main():
             st.session_state.pop("user")
             st.rerun()
 
-        # Tabs for navigation
         tabs = ["Documents", "Upload", "Contracts"]
         if user["role"] == "viewer":
             tabs = ["Documents", "Contracts"]
@@ -880,27 +859,15 @@ def main():
         # 🔵 Make tabs blue (active + hover)
         st.markdown("""
         <style>
-        /* active underline */
-        .stTabs [data-baseweb="tab-highlight"] {
-          background-color: #2563EB !important;
-        }
-        /* active tab text */
-        .stTabs [role="tab"][aria-selected="true"] p {
-          color: #2563EB !important;
-        }
-        /* hover color for inactive tabs */
-        .stTabs [role="tab"]:not([aria-selected="true"]) p { 
-          transition: color .15s ease;
-        }
+        .stTabs [data-baseweb="tab-highlight"] { background-color: #2563EB !important; }
+        .stTabs [role="tab"][aria-selected="true"] p { color: #2563EB !important; }
+        .stTabs [role="tab"]:not([aria-selected="true"]) p { transition: color .15s ease; }
         .stTabs [role="tab"]:not([aria-selected="true"]):hover p,
-        .stTabs [role="tab"]:not([aria-selected="true"]):focus p {
-          color: #2563EB !important;
-        }
+        .stTabs [role="tab"]:not([aria-selected="true"]):focus p { color: #2563EB !important; }
         </style>
         """, unsafe_allow_html=True)
 
         t = st.tabs(tabs)
-
         with t[0]:
             page_documents(con, user)
         if "Upload" in tabs:
