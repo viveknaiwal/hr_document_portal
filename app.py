@@ -160,7 +160,7 @@ def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: in
         remote_file = remote_dir + "/" + filename
         dbx_upload_bytes(remote_file, data)
         return "dbx:" + remote_file
-    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"]
+    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"  # <-- fixed line
     subdir.mkdir(parents=True, exist_ok=True)
     local_file = subdir / filename
     local_file.write_bytes(data)
