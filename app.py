@@ -417,69 +417,30 @@ def last_delete_info(con, table: str, row_id: int):
     return row if row else ("", "")
 
 # ===================================================================
-#                               SERVE MODE
-# ===================================================================
-if "serve" in st.query_params:
-    token = st.query_params["serve"]
-    con = init_db()
-
-    target_ref = None
-    found_table, found_id = None, None
-
-    for rid, fp, ep, ft, et in con.execute(
-        "SELECT id,file_path,email_path,file_token,email_token FROM documents WHERE is_deleted=0"
-    ).fetchall():
-        if token == ft: target_ref, found_table, found_id = fp, "documents", rid
-        if token == et: target_ref, found_table, found_id = ep, "documents", rid
-
-    if not target_ref:
-        for rid, fp, ep, ft, et in con.execute(
-            "SELECT id,file_path,email_path,file_token,email_token FROM contracts WHERE is_deleted=0"
-        ).fetchall():
-            if token == ft: target_ref, found_table, found_id = fp, "contracts", rid
-            if token == et: target_ref, found_table, found_id = ep, "contracts", rid
-
-    if not target_ref or not ref_exists(target_ref):
-        st.error("File not found"); st.stop()
-
-    actor = (st.session_state.get("user") or {}).get("username", "public")
-    insert_audit(con, actor, "VIEW", found_id, f"{found_table}:{to_display_name(target_ref)}")
-
-    data = read_ref_bytes(target_ref)
-    name = to_display_name(target_ref)
-    mime, _ = mimetypes.guess_type(name)
-
-    st.markdown(f"### {name}")
-
-    if name.lower().endswith(".pdf") and data:
-        if len(data) <= 30_000_000:
-            b64 = base64.b64encode(data).decode()
-            html = f"""
-            <object data="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
-                    type="application/pdf" width="100%" height="820">
-              <embed src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
-                     type="application/pdf" />
-              <p>PDF preview failed. <a href="data:application/pdf;base64,{b64}" download="{name}">Download</a>.</p>
-            </object>
-            """
-            st.components.v1.html(html, height=840, scrolling=False)
-        else:
-            st.info("Large PDF — preview disabled. Use Download below.")
-        st.download_button("⬇️ Download", data, name, mime or "application/pdf")
-        st.stop()
-
-    if name.lower().endswith((".png", ".jpg", ".jpeg")) and data:
-        st.image(data, use_container_width=True)
-    elif name.lower().endswith(".txt") and data:
-        st.text(data.decode(errors="replace")[:5000])
-    else:
-        st.info("Preview not supported inline. Use Download below.")
-    st.download_button("⬇️ Download", data, name, mime or "application/octet-stream")
-    st.stop()
-
-# ===================================================================
 #                                PAGES
 # ===================================================================
+def versions_with_links(con, versions_df):
+    df = versions_df.copy()
+    view_doc, view_email = [], []
+    for r in df.itertuples():
+        ft, et = ensure_tokens(con, getattr(r, "id"), bool(getattr(r, "email_path")))
+        view_doc.append(f"/?serve={ft}" if ft else "—")
+        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
+    df["View (doc)"] = view_doc
+    df["View (email)"] = view_email
+    return df
+
+def versions_with_links_contracts(con, versions_df):
+    df = versions_df.copy()
+    view_doc, view_email = [], []
+    for r in df.itertuples():
+        ft, et = ensure_tokens_generic(con, "contracts", getattr(r, "id"), bool(getattr(r, "email_path")))
+        view_doc.append(f"/?serve={ft}" if ft else "—")
+        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
+    df["View (doc)"] = view_doc
+    df["View (email)"] = view_email
+    return df
+
 def page_upload(con, user):
     if user["role"] not in {"admin", "editor"}:
         st.info("You have viewer access — uploads are disabled.")
@@ -528,28 +489,6 @@ def page_upload(con, user):
                      details=f"Uploaded {doc_type}/{name} v{version}; approved_by='{approved_by}'; remarks='{remarks.strip()}'")
         backup_db_to_dropbox()
         st.success(f"Uploaded as version {version}")
-
-def versions_with_links(con, versions_df):
-    df = versions_df.copy()
-    view_doc, view_email = [], []
-    for r in df.itertuples():
-        ft, et = ensure_tokens(con, getattr(r, "id"), bool(getattr(r, "email_path")))
-        view_doc.append(f"/?serve={ft}" if ft else "—")
-        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
-    df["View (doc)"] = view_doc
-    df["View (email)"] = view_email
-    return df
-
-def versions_with_links_contracts(con, versions_df):
-    df = versions_df.copy()
-    view_doc, view_email = [], []
-    for r in df.itertuples():
-        ft, et = ensure_tokens_generic(con, "contracts", getattr(r, "id"), bool(getattr(r, "email_path")))
-        view_doc.append(f"/?serve={ft}" if ft else "—")
-        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
-    df["View (doc)"] = view_doc
-    df["View (email)"] = view_email
-    return df
 
 def page_documents(con, user):
     st.subheader("Browse Documents")
@@ -669,6 +608,116 @@ def page_documents(con, user):
                     st.success(f"Document version {sel_v} moved to Deleted")
                     st.rerun()
 
+def page_contracts(con, user):
+    st.subheader("Contract Management")
+
+    can_upload = user["role"] in {"admin", "editor"}
+    if can_upload:
+        with st.form("contract_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                name   = st.text_input("Contract Name *")
+                vendor = st.text_input("Vendor *")
+                owner  = st.text_input("Internal Owner / POC")
+                status = st.selectbox("Status", ["Active", "Under review", "Expired"])
+            with c2:
+                start  = st.date_input("Start date *", dt.date.today())
+                end    = st.date_input("End date *", dt.date.today())
+                renewal = st.number_input("Renewal notice (days)", min_value=0, value=60, step=5)
+            remarks = st.text_area("Remarks / Context *", height=100)
+            doc  = st.file_uploader("Contract file (PDF/Doc) *")
+            email = st.file_uploader("Approval/email attachment (optional)")
+            ok = st.form_submit_button("Upload contract")
+
+        if ok:
+            if not name or not vendor or not doc or not remarks.strip():
+                st.error("Please fill Contract Name, Vendor, Contract file, and Remarks."); return
+            data = doc.read()
+
+            cur = con.execute("SELECT MAX(version) FROM contracts WHERE name=? AND vendor=?", (name, vendor))
+            maxv = cur.fetchone()[0]
+            version = (maxv + 1) if maxv else 1
+
+            file_ref = write_bytes_return_ref(data, doc_type="Contract", name=name, version=version, filename=doc.name)
+            email_ref = ""
+            if email:
+                email_ref = write_bytes_return_ref(email.read(), doc_type="Contract", name=name, version=version,
+                                                   filename="email_" + email.name)
+
+            ft, et = gen_token(), (gen_token() if email_ref else None)
+
+            con.execute(
+                """INSERT INTO contracts
+                   (name,vendor,owner,status,start_date,end_date,renewal_notice_days,
+                    created_date,upload_date,uploaded_by,file_path,email_path,version,hash_sha256,
+                    is_deleted,file_token,email_token,remarks)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+                (name, vendor, owner, status, str(start), str(end), int(renewal),
+                 str(start), dt.datetime.utcnow().isoformat(), user["username"],
+                 file_ref, email_ref, version, sha256_bytes(data), ft, et, remarks.strip())
+            )
+            con.commit()
+            insert_audit(con, user["username"], "CONTRACT_UPLOAD",
+                         details=f"{vendor}/{name} v{version}; status={status}; start={start}; end={end}; remarks='{remarks.strip()}'")
+            backup_db_to_dropbox()
+            st.success(f"Contract uploaded as version {version}")
+
+    st.markdown("---")
+    df = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
+    if df.empty:
+        st.info("No contracts yet."); return
+
+    df["days_to_expiry"] = _days_to_expiry(df["end_date"])
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: v_q = st.text_input("Search vendor", key="contracts_filter_vendor")
+    with c2: o_q = st.text_input("Search owner", key="contracts_filter_owner")
+    with c3: s_q = st.selectbox("Status", ["All", "Active", "Under review", "Expired"],
+                                key="contracts_filter_status")
+    with c4: exp_days = st.selectbox("Expiring in", ["All", 30, 60, 90], key="contracts_filter_exp")
+
+    f = df.copy()
+    if v_q: f = f[f["vendor"].str.contains(v_q, case=False, na=False)]
+    if o_q: f = f[f["owner"].str.contains(o_q, case=False, na=False)]
+    if s_q != "All": f = f[f["status"] == s_q]
+    if exp_days != "All":
+        f = f[(f["days_to_expiry"] >= 0) & (f["days_to_expiry"] <= int(exp_days))]
+
+    if f.empty:
+        st.info("No matching contracts"); return
+
+    f["version"] = pd.to_numeric(f["version"], errors="coerce").fillna(0).astype(int)
+    latest_flags = f.groupby(["vendor", "name"])["version"].transform("max")
+    f["is_latest"] = f["version"] == latest_flags
+
+    st.dataframe(
+        f[["vendor","name","status","start_date","end_date","days_to_expiry",
+           "version","is_latest","uploaded_by","remarks"]],
+        use_container_width=True
+    )
+
+    st.markdown("### Open a contract group")
+    groups = f.drop_duplicates(subset=["vendor","name"])
+    labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
+    if labels:
+        pick = st.selectbox("Select contract", labels, key="contracts_group_pick")
+        if pick:
+            sel_group = groups.iloc[labels.index(pick)]
+            versions = f[(f["vendor"] == sel_group["vendor"]) & (f["name"] == sel_group["name"])]\
+                .sort_values("version", ascending=False)
+            v_table = versions_with_links_contracts(con, versions)
+            v_show = v_table[["version","upload_date","uploaded_by","status",
+                              "start_date","end_date","remarks","View (doc)","View (email)"]]
+            st.data_editor(
+                v_show, use_container_width=True, disabled=True,
+                key=f"contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
+                column_config={
+                    "View (doc)": st.column_config.LinkColumn("View (doc)"),
+                    "View (email)": st.column_config.LinkColumn("View (email)")
+                }
+            )
+
+# ---------------- Deleted / Audit / Users ----------------
 def page_deleted(con, user):
     st.subheader("Deleted")
 
@@ -712,7 +761,6 @@ def page_deleted(con, user):
                     restore_record(con, "contracts", int(selc), user["username"])
                     st.success("Restored"); st.rerun()
 
-# ---------------- Audit & Users ----------------
 def page_audit(con, user=None):
     st.subheader("Audit Log")
     df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
@@ -809,10 +857,78 @@ def login_view():
     return submitted, u, p, keep
 
 # ===================================================================
+#                           SERVE MODE HANDLER
+# ===================================================================
+def handle_serve_mode():
+    if "serve" not in st.query_params:
+        return False
+    token = st.query_params["serve"]
+    con = init_db()
+
+    target_ref = None
+    found_table, found_id = None, None
+
+    for rid, fp, ep, ft, et in con.execute(
+        "SELECT id,file_path,email_path,file_token,email_token FROM documents WHERE is_deleted=0"
+    ).fetchall():
+        if token == ft: target_ref, found_table, found_id = fp, "documents", rid
+        if token == et: target_ref, found_table, found_id = ep, "documents", rid
+
+    if not target_ref:
+        for rid, fp, ep, ft, et in con.execute(
+            "SELECT id,file_path,email_path,file_token,email_token FROM contracts WHERE is_deleted=0"
+        ).fetchall():
+            if token == ft: target_ref, found_table, found_id = fp, "contracts", rid
+            if token == et: target_ref, found_table, found_id = ep, "contracts", rid
+
+    if not target_ref or not ref_exists(target_ref):
+        st.error("File not found"); st.stop()
+
+    actor = (st.session_state.get("user") or {}).get("username", "public")
+    insert_audit(con, actor, "VIEW", found_id, f"{found_table}:{to_display_name(target_ref)}")
+
+    data = read_ref_bytes(target_ref)
+    name = to_display_name(target_ref)
+    mime, _ = mimetypes.guess_type(name)
+
+    st.markdown(f"### {name}")
+
+    if name.lower().endswith(".pdf") and data:
+        if len(data) <= 30_000_000:
+            b64 = base64.b64encode(data).decode()
+            html = f"""
+            <object data="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
+                    type="application/pdf" width="100%" height="820">
+              <embed src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
+                     type="application/pdf" />
+              <p>PDF preview failed. <a href="data:application/pdf;base64,{b64}" download="{name}">Download</a>.</p>
+            </object>
+            """
+            st.components.v1.html(html, height=840, scrolling=False)
+        else:
+            st.info("Large PDF — preview disabled. Use Download below.")
+        st.download_button("⬇️ Download", data, name, mime or "application/pdf")
+        st.stop()
+
+    if name.lower().endswith((".png", ".jpg", ".jpeg")) and data:
+        st.image(data, use_container_width=True)
+    elif name.lower().endswith(".txt") and data:
+        st.text(data.decode(errors="replace")[:5000])
+    else:
+        st.info("Preview not supported inline. Use Download below.")
+    st.download_button("⬇️ Download", data, name, mime or "application/octet-stream")
+    st.stop()
+
+# ===================================================================
 #                                MAIN
 # ===================================================================
 def main():
     st.set_page_config(APP_TITLE, layout="wide")
+
+    # If in serve mode, render file and stop
+    if handle_serve_mode():
+        return  # safety, though handle_serve_mode uses st.stop()
+
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
 
@@ -869,19 +985,19 @@ def main():
         t = st.tabs(tabs)
         with t[0]:
             page_documents(con, user)
-        if "Upload" in tabs:
+        if "Upload" in tabs and "page_upload" in globals():
             with t[tabs.index("Upload")]:
                 page_upload(con, user)
-        if "Contracts" in tabs:
+        if "Contracts" in tabs and "page_contracts" in globals():
             with t[tabs.index("Contracts")]:
                 page_contracts(con, user)
-        if "Deleted" in tabs:
+        if "Deleted" in tabs and "page_deleted" in globals():
             with t[tabs.index("Deleted")]:
                 page_deleted(con, user)
-        if "Audit" in tabs:
+        if "Audit" in tabs and "page_audit" in globals():
             with t[tabs.index("Audit")]:
                 page_audit(con)
-        if "Manage Users" in tabs:
+        if "Manage Users" in tabs and "page_manage_users" in globals():
             with t[tabs.index("Manage Users")]:
                 page_manage_users(con, user)
 
