@@ -113,6 +113,7 @@ def gdrive_upload_bytes(parts: list[str], filename: str, data: bytes) -> str:
     parent = GDRIVE_ROOT_ID
     for p in parts:
         parent = gdrive_get_or_create_folder(parent, p)
+    from googleapiclient.http import MediaIoBaseUpload  # safe import inside func
     media = MediaIoBaseUpload(BytesIO(data), mimetype=mimetypes.guess_type(filename)[0] or "application/octet-stream")
     meta = {"name": filename, "parents": [parent]}
     f = gdrive_service.files().create(body=meta, media_body=media, fields="id").execute()
@@ -122,6 +123,7 @@ def gdrive_download_bytes(file_id: str) -> bytes | None:
     try:
         req = gdrive_service.files().get_media(fileId=file_id)
         buf = BytesIO()
+        from googleapiclient.http import MediaIoBaseDownload  # safe import inside func
         downloader = MediaIoBaseDownload(buf, req)
         done = False
         while not done:
@@ -441,6 +443,28 @@ def versions_with_links_contracts(con, versions_df):
     df["View (email)"] = view_email
     return df
 
+# --- Delete UI helper (Reason required; button below Reason) ---
+def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con, user):
+    st.markdown("#### Delete")
+    sel_v = st.selectbox(
+        "Version to delete",
+        versions_df["version"].tolist(),
+        key=f"del_{entity}_v"
+    )
+    reason = st.text_input(
+        "Reason (required)",
+        key=f"del_{entity}_reason",
+        help="Add a short justification; it will be recorded in the audit log."
+    )
+    if st.button("Delete version", key=f"btn_del_{entity}"):
+        if not reason.strip():
+            st.error("Please enter a reason.")
+            return
+        row_id = int(versions_df.loc[versions_df["version"] == sel_v, "id"].iloc[0])
+        soft_delete_record(con, table, row_id, user["username"], reason.strip())
+        st.success(f"{entity.capitalize()} version {sel_v} moved to Deleted")
+        st.rerun()
+
 def page_upload(con, user):
     if user["role"] not in {"admin", "editor"}:
         st.info("You have viewer access — uploads are disabled.")
@@ -565,17 +589,7 @@ def page_documents(con, user):
         )
 
         if user["role"] in {"admin", "editor"} and not versions.empty:
-            st.markdown("#### Delete")
-            del_col1, del_col2 = st.columns([2,1])
-            with del_col1:
-                sel_v = st.selectbox("Version to delete", versions["version"].tolist(), key="del_contract_v")
-                reason = st.text_input("Reason (optional)", key="del_contract_reason")
-            with del_col2:
-                if st.button("Delete version", key="btn_del_contract"):
-                    row_id = int(versions.loc[versions["version"] == sel_v, "id"].iloc[0])
-                    soft_delete_record(con, "contracts", row_id, user["username"], reason)
-                    st.success(f"Contract version {sel_v} moved to Deleted")
-                    st.rerun()
+            delete_version_ui(entity="contract", table="contracts", versions_df=versions, con=con, user=user)
 
     # -------- DOCUMENTS branch --------
     else:
@@ -596,17 +610,7 @@ def page_documents(con, user):
         )
 
         if user["role"] in {"admin", "editor"} and not versions.empty:
-            st.markdown("#### Delete")
-            del_col1, del_col2 = st.columns([2,1])
-            with del_col1:
-                sel_v = st.selectbox("Version to delete", versions["version"].tolist(), key="del_doc_v")
-                reason = st.text_input("Reason (optional)", key="del_doc_reason")
-            with del_col2:
-                if st.button("Delete version", key="btn_del_doc"):
-                    row_id = int(versions.loc[versions["version"] == sel_v, "id"].iloc[0])
-                    soft_delete_record(con, "documents", row_id, user["username"], reason)
-                    st.success(f"Document version {sel_v} moved to Deleted")
-                    st.rerun()
+            delete_version_ui(entity="document", table="documents", versions_df=versions, con=con, user=user)
 
 def page_contracts(con, user):
     st.subheader("Contract Management")
@@ -696,7 +700,7 @@ def page_contracts(con, user):
         use_container_width=True
     )
 
-    st.markdown("### Open a contract group")
+    st.markdown("### Version history")
     groups = f.drop_duplicates(subset=["vendor","name"])
     labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
     if labels:
@@ -726,7 +730,7 @@ def page_deleted(con, user):
     with tab_docs:
         df = pd.read_sql("SELECT * FROM documents WHERE is_deleted=1 ORDER BY upload_date DESC", con)
         if df.empty:
-            st.info("No deleted documents."); 
+            st.info("No deleted documents.")
         else:
             deleted_by, deleted_at = [], []
             for rid in df["id"].tolist():
@@ -927,7 +931,7 @@ def main():
 
     # If in serve mode, render file and stop
     if handle_serve_mode():
-        return  # safety, though handle_serve_mode uses st.stop()
+        return  # (handle_serve_mode calls st.stop())
 
     con = st.session_state.get("con") or init_db()
     st.session_state["con"] = con
@@ -985,19 +989,19 @@ def main():
         t = st.tabs(tabs)
         with t[0]:
             page_documents(con, user)
-        if "Upload" in tabs and "page_upload" in globals():
+        if "Upload" in tabs:
             with t[tabs.index("Upload")]:
                 page_upload(con, user)
-        if "Contracts" in tabs and "page_contracts" in globals():
+        if "Contracts" in tabs:
             with t[tabs.index("Contracts")]:
                 page_contracts(con, user)
-        if "Deleted" in tabs and "page_deleted" in globals():
+        if "Deleted" in tabs:
             with t[tabs.index("Deleted")]:
                 page_deleted(con, user)
-        if "Audit" in tabs and "page_audit" in globals():
+        if "Audit" in tabs:
             with t[tabs.index("Audit")]:
                 page_audit(con)
-        if "Manage Users" in tabs and "page_manage_users" in globals():
+        if "Manage Users" in tabs:
             with t[tabs.index("Manage Users")]:
                 page_manage_users(con, user)
 
