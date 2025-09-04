@@ -1,4 +1,6 @@
 streamlit
 pandas
-openpyxl
 dropbox
+google-api-python-client
+google-auth
+openpyxl
