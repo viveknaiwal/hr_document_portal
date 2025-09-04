@@ -160,7 +160,7 @@ def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: in
         remote_file = remote_dir + "/" + filename
         dbx_upload_bytes(remote_file, data)
         return "dbx:" + remote_file
-    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"  # <-- fixed line
+    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"
     subdir.mkdir(parents=True, exist_ok=True)
     local_file = subdir / filename
     local_file.write_bytes(data)
@@ -276,7 +276,7 @@ def init_db():
         )
         con.commit()
 
-    # non-breaking schema adds (safe if already exist)
+    # non-breaking schema adds
     for stmt in [
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
@@ -679,7 +679,6 @@ def page_deleted(con, user):
         if df.empty:
             st.info("No deleted documents."); 
         else:
-            # who deleted + when
             deleted_by, deleted_at = [], []
             for rid in df["id"].tolist():
                 who, when = last_delete_info(con, "documents", int(rid))
