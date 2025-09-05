@@ -82,6 +82,39 @@ def load_css():
     }
     """
     st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
+    st.markdown(f"<style>"+'''
+    /* Global accent and positive blues */
+    :root { --c24-blue:#2563EB; --c24-blue-100:#eff6ff; --c24-blue-200:#dbeafe; --c24-blue-300:#bfdbfe; }
+    /* Buttons: make all Streamlit buttons blue by default */
+    .stButton > button, .stDownloadButton > button {
+        background: var(--c24-blue) !important; color:#fff !important; border:1px solid var(--c24-blue) !important;
+        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px rgba(37,99,235,.25) !important;
+    }
+    .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
+    /* Checkboxes / Radios accent */
+    input[type=\"radio\"], input[type=\"checkbox\"] { accent-color: var(--c24-blue) !important; }
+    /* Sidebar gradient */
+    section[data-testid=\"stSidebar\"] {
+        background: linear-gradient(180deg,#3b82f6 0%, #8ab5ff 100%) !important;
+    }
+    section[data-testid=\"stSidebar\"] .block-container { color:#0f172a !important; }
+    /* Radio options as cards */
+    .stRadio > div[role=\"radiogroup\"] > label {
+        background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:.65rem .9rem; margin:.35rem 0;
+        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,.05);
+    }
+    /* Inputs / selects subtle blue fill */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
+        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
+    }
+    .stSelectbox [data-baseweb=\"select\"] > div {
+        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
+    }
+    /* File uploader dropzone */
+    .stFileUploader div[data-testid=\"stFileUploaderDropzone\"] {
+        background:#f8fbff !important; border:1px dashed var(--c24-blue-300) !important;
+    }
+''' + "</style>", unsafe_allow_html=True)
     # Try to append style.css if present
     try:
         with open("style.css", "r", encoding="utf-8") as f:
@@ -625,7 +658,7 @@ def page_upload(con, user):
     st.markdown('</div>', unsafe_allow_html=True)
 
 def page_documents(con, user):
-    create_header("Documents hub", "Search, filter, and drill into versions")
+    create_header("Dashboard", "Overview, search and version drilldowns")
     st.markdown('<div class="custom-card">', unsafe_allow_html=True)
 
     # Metrics
@@ -639,6 +672,17 @@ def page_documents(con, user):
                 + create_metric_card("Active Contracts", contracts_count, "📋")
                 + create_metric_card("Recent Uploads (7d)", recent_uploads, "🆕")
                 + '</div>', unsafe_allow_html=True)
+
+    # Second row: counts by type
+    sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
+    brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
+    pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
+    st.markdown('<div class="metric-row">'
+                + create_metric_card("SOPs", sop_count, "📘")
+                + create_metric_card("BRDs", brd_count, "📗")
+                + create_metric_card("Policies", pol_count, "📙")
+                + '</div>', unsafe_allow_html=True)
+
 
     # Data
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
@@ -1117,7 +1161,7 @@ def main():
             st.markdown(f'<div class="subtle">{user["username"]}</div>', unsafe_allow_html=True)
             st.markdown(f'<span class="role-pill">{user["role"].title()}</span>', unsafe_allow_html=True)
             st.write("")
-            pages = ["📋 Documents"]
+            pages = ["📊 Dashboard"]
             if user["role"] in {"admin","editor"}:
                 pages += ["📤 Document Management","📄 Contract Management"]
             else:
@@ -1134,7 +1178,7 @@ def main():
                 st.session_state.pop("user")
                 st.rerun()
 
-        if choice == "📋 Documents":
+        if choice == "📊 Dashboard":
             page_documents(con, user)
         elif choice == "📤 Document Management":
             page_upload(con, user)
