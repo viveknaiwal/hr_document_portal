@@ -15,13 +15,89 @@ APP_TITLE = "HR Document Portal"
 
 # ------------------------------ CSS & UI Helpers ------------------------------
 
+
 def load_css():
-    """Inline base styles; will also append style.css if present."""
+    """Inline base styles and theme overrides (ours load last)."""
     base_css = """
-    /* Layout */
+    :root {
+      --c24-blue:#0ea5e9;
+      --c24-blue-600:#2563EB;
+      --c24-blue-700:#1d4ed8;
+      --c24-blue-800:#1e40af;
+      --c24-blue-900:#0f2e5a;
+      --c24-blue-100:#eff6ff;
+      --c24-blue-200:#dbeafe;
+      --c24-blue-300:#bfdbfe;
+    }
     .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
     .subtle { color: #6b7280; }
 
+    /* Header gradient */
+    .custom-header{
+        background: linear-gradient(135deg,#0f3d52 0%, var(--c24-blue) 55%, #38bdf8 100%);
+        color:#fff; border-radius:16px; padding:22px 22px; margin:8px 0 18px;
+        box-shadow: 0 12px 24px rgba(2,6,23,.25);
+    }
+    .custom-header h1 { margin:0 0 4px; font-size:1.5rem; }
+    .custom-header p { margin:0; opacity:.92 }
+
+    /* Metric layout (compact) */
+    .metric-compact h3 { margin:.1rem 0; font-size:1.2rem; color:#0f172a }
+    .metric-compact small { color:#6b7280 }
+
+    /* Pill links in tables */
+    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
+      text-decoration:none;border:1px solid #e5e7eb;padding:.25rem .65rem;border-radius:9999px;
+      background:#fff;color:#111;display:inline-block;
+    }
+
+    /* Status badges */
+    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600}
+    .status-active{background:#dcfce7;color:#065f46;border:1px solid #86efac}
+    .status-expired{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+    .status-review{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}
+
+    /* Sidebar gradient like your reference */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg,#3b82f6 0%, #8bbcff 100%) !important;
+    }
+    section[data-testid="stSidebar"] .block-container { padding-top:1rem; color:#0f172a; }
+    .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:#e0e7ff;
+                 color:#3730a3;font-size:.75rem;margin-top:.25rem }
+
+    /* Radio as cards + blue indicators */
+    .stRadio > div[role="radiogroup"] > label {
+        background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
+        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,.05);
+    }
+    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--c24-blue-700) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--c24-blue-700) !important; }
+
+    /* Inputs / selects subtle blue fill */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
+        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
+    }
+    .stSelectbox [data-baseweb="select"] > div {
+        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
+    }
+    .stFileUploader div[data-testid="stFileUploaderDropzone"] {
+        background:#f1f5ff !important; border:1px dashed var(--c24-blue-300) !important;
+    }
+
+    /* Buttons default to positive blue */
+    .stButton > button, .stDownloadButton > button {
+        background: var(--c24-blue-600) !important; color:#fff !important; border:1px solid var(--c24-blue-600) !important;
+        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px rgba(37,99,235,.25) !important;
+    }
+    .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
+    """
+    # Load user style first (if exists), then our overrides last so we win precedence
+    try:
+        with open("style.css", "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except Exception:
+        pass
+    st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
     /* Header */
     .custom-header{
         background: linear-gradient(135deg,#1e293b 0%,#0ea5e9 60%,#38bdf8 100%);
@@ -657,34 +733,33 @@ def page_upload(con, user):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 def page_documents(con, user):
     create_header("Dashboard", "Overview, search and version drilldowns")
+
+    # --- Compact KPI rows (avoid HTML printing issues) ---
+    with st.container():
+        c1, c2, c3, c4 = st.columns(4)
+        docs_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c'])
+        contracts_count = int(pd.read_sql("SELECT COUNT(*) as c FROM contracts WHERE is_deleted=0", con).iloc[0]['c'])
+        recent_uploads = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE date(upload_date) >= date('now','-30 days')", con).iloc[0]['c'])
+        unpublished = 0  # placeholder if you add a field later
+        with c1: st.metric("Total Documents", docs_count)
+        with c2: st.metric("Active Contracts", contracts_count)
+        with c3: st.metric("New last 30 days", recent_uploads)
+        with c4: st.metric("Unpublished Docs", unpublished)
+
+        c5, c6, c7 = st.columns(3)
+        sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
+        brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
+        pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
+        with c5: st.metric("SOPs", sop_count)
+        with c6: st.metric("BRDs", brd_count)
+        with c7: st.metric("Policies", pol_count)
+
     st.markdown('<div class="custom-card">', unsafe_allow_html=True)
 
-    # Metrics
-    docs_count = pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c']
-    contracts_count = pd.read_sql("SELECT COUNT(*) as c FROM contracts WHERE is_deleted=0", con).iloc[0]['c']
-    recent_uploads = pd.read_sql(
-        "SELECT COUNT(*) as c FROM documents WHERE date(upload_date) >= date('now','-7 days')", con
-    ).iloc[0]['c']
-    st.markdown('<div class="metric-row">'
-                + create_metric_card("Total Documents", docs_count, "📄")
-                + create_metric_card("Active Contracts", contracts_count, "📋")
-                + create_metric_card("Recent Uploads (7d)", recent_uploads, "🆕")
-                + '</div>', unsafe_allow_html=True)
-
-    # Second row: counts by type
-    sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
-    brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
-    pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
-    st.markdown('<div class="metric-row">'
-                + create_metric_card("SOPs", sop_count, "📘")
-                + create_metric_card("BRDs", brd_count, "📗")
-                + create_metric_card("Policies", pol_count, "📙")
-                + '</div>', unsafe_allow_html=True)
-
-
-    # Data
+    # --- Data table & filters ---
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
     c = pd.read_sql("""SELECT id, 'Contract' AS doc_type, name,
                               start_date AS created_date, upload_date,
@@ -695,7 +770,9 @@ def page_documents(con, user):
     f = pd.concat([d, c], ignore_index=True)
 
     if f.empty:
-        st.info("No documents available"); st.markdown('</div>', unsafe_allow_html=True); return
+        st.info("No documents available")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
 
     col1, col2, col3 = st.columns(3)
     with col1: t = st.selectbox("File Type", ["All"] + sorted(f["doc_type"].unique().tolist()), key="docs_filter_type")
@@ -708,7 +785,9 @@ def page_documents(con, user):
     if apr_vendor_q: g = g[g["approved_by"].str.contains(apr_vendor_q, case=False, na=False)]
 
     if g.empty:
-        st.info("No matching documents"); st.markdown('</div>', unsafe_allow_html=True); return
+        st.info("No matching documents")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
 
     g["version"] = pd.to_numeric(g["version"], errors="coerce").fillna(0).astype(int)
     latest_flags = g.groupby(["doc_type", "name"])["version"].transform("max")
@@ -727,10 +806,14 @@ def page_documents(con, user):
     st.markdown("### Document Versions")
     groups = g.drop_duplicates(subset=["doc_type","name","vendor"])
     labels = [f"{r.doc_type} — {r.name}" for r in groups.itertuples()]
-    if not labels: st.markdown('</div>', unsafe_allow_html=True); return
+    if not labels:
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
 
     pick = st.selectbox("Select Document", labels, key="docs_group_pick")
-    if not pick: st.markdown('</div>', unsafe_allow_html=True); return
+    if not pick:
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
     sel_group = groups.iloc[labels.index(pick)]
 
     if sel_group["doc_type"] == "Contract":
