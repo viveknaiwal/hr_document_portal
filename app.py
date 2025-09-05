@@ -740,6 +740,53 @@ def page_documents(con, user):
         if user["role"] in {"admin", "editor"} and not versions.empty:
             delete_version_ui(entity="document", table="documents", versions_df=versions, con=con, user=user)
 
+
+def page_docs_hub(con, user):
+    st.subheader("Docs Hub")
+
+    # Load
+    docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
+    contracts = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
+
+    # UTC-safe
+    now_utc = pd.Timestamp.now(tz="UTC")
+    last30_utc = now_utc - pd.Timedelta(days=30)
+    docs_up = pd.to_datetime(docs.get("upload_date"), utc=True, errors="coerce")
+    cons_up = pd.to_datetime(contracts.get("upload_date"), utc=True, errors="coerce")
+
+    # KPIs
+    colA, colB, colC, colD = st.columns(4)
+    colA.metric("Documents (all versions)", int(len(docs)))
+    colB.metric("Unique docs", int(docs[["doc_type","name"]].drop_duplicates().shape[0]))
+    colC.metric("Contracts (all versions)", int(len(contracts)))
+    colD.metric("New last 30 days", int((docs_up >= last30_utc).sum() + (cons_up >= last30_utc).sum()))
+
+    # By type counts
+    distinct_docs = docs[["doc_type","name"]].drop_duplicates()
+    counts = distinct_docs["doc_type"].value_counts().to_dict()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("SOPs", int(counts.get("SOP", 0)))
+    c2.metric("BRDs", int(counts.get("BRD", 0)))
+    c3.metric("Policies", int(counts.get("Policy", 0)))
+
+    # Uploads over time
+    def _bucket(df, label):
+        if df.empty: return pd.DataFrame(columns=["date","type","count"])
+        tmp = df.copy()
+        tmp_dates = pd.to_datetime(tmp["upload_date"], utc=True, errors="coerce").dt.tz_convert(None).dt.date
+        tmp = tmp.assign(date=tmp_dates).groupby(["date"]).size().reset_index(name="count")
+        tmp["type"] = label
+        return tmp
+    trend = pd.concat([_bucket(docs, "Documents"), _bucket(contracts, "Contracts")], ignore_index=True)
+    if not trend.empty:
+        st.markdown("### Uploads over time")
+        st.line_chart(trend.pivot_table(index="date", columns="type", values="count", fill_value=0))
+
+    st.markdown("---")
+    # Embedded browser
+    page_documents(con, user)
+
+
 def page_contracts(con, user):
     st.subheader("Contract Management")
 
@@ -1175,29 +1222,58 @@ def verify_integrity(con):
                 problems.append({"table": table, "id": rid, "issue": "Hash mismatch"})
     return pd.DataFrame(problems)
 
+
 def token_health(con):
     recs = []
     now = dt.datetime.utcnow()
-    for table in ["documents", "contracts"]:
-        rows = pd.read_sql(f"SELECT id,name,COALESCE(vendor,'') as vendor,file_token,email_token,file_token_expires,email_token_expires FROM {table} WHERE is_deleted=0", con)
-        for r in rows.itertuples():
-            for kind, tok, exp in [("file", r.file_token, r.file_token_expires), ("email", r.email_token, r.email_token_expires)]:
-                if not tok: continue
-                status = "ok"
-                if not exp:
-                    status = "no-expiry"
-                else:
-                    try:
-                        exp_dt = dt.datetime.fromisoformat(exp)
-                        if exp_dt < now: status = "expired"
-                        elif exp_dt - now <= dt.timedelta(days=3): status = "expiring-soon"
-                    except Exception:
-                        status = "bad-expiry"
-                recs.append({
-                    "table": table, "id": r.id, "name": r.name, "vendor": r.vendor if hasattr(r,'vendor') else "",
-                    "token_type": kind, "status": status, "expires": exp or ""
-                })
+    # Documents (no vendor column)
+    rows_d = pd.read_sql(
+        "SELECT id,name,file_token,email_token,file_token_expires,email_token_expires FROM documents WHERE is_deleted=0",
+        con
+    )
+    for r in rows_d.itertuples():
+        for kind, tok, exp in [("file", r.file_token, r.file_token_expires), ("email", r.email_token, r.email_token_expires)]:
+            if not tok: 
+                continue
+            status = "ok"
+            if not exp:
+                status = "no-expiry"
+            else:
+                try:
+                    exp_dt = dt.datetime.fromisoformat(exp)
+                    if exp_dt < now: status = "expired"
+                    elif exp_dt - now <= dt.timedelta(days=3): status = "expiring-soon"
+                except Exception:
+                    status = "bad-expiry"
+            recs.append({
+                "table": "documents", "id": r.id, "name": r.name, "vendor": "",
+                "token_type": kind, "status": status, "expires": exp or ""
+            })
+    # Contracts (has vendor)
+    rows_c = pd.read_sql(
+        "SELECT id,name,vendor,file_token,email_token,file_token_expires,email_token_expires FROM contracts WHERE is_deleted=0",
+        con
+    )
+    for r in rows_c.itertuples():
+        for kind, tok, exp in [("file", r.file_token, r.file_token_expires), ("email", r.email_token, r.email_token_expires)]:
+            if not tok: 
+                continue
+            status = "ok"
+            if not exp:
+                status = "no-expiry"
+            else:
+                try:
+                    exp_dt = dt.datetime.fromisoformat(exp)
+                    if exp_dt < now: status = "expired"
+                    elif exp_dt - now <= dt.timedelta(days=3): status = "expiring-soon"
+                except Exception:
+                    status = "bad-expiry"
+            recs.append({
+                "table": "contracts", "id": r.id, "name": r.name, "vendor": r.vendor or "",
+                "token_type": kind, "status": status, "expires": exp or ""
+            })
     return pd.DataFrame(recs)
+
 
 def retention_exceptions(con):
     docs = pd.read_sql("SELECT id,name,doc_type,created_date,retention_policy,legal_hold FROM documents WHERE is_deleted=0", con)
@@ -1436,9 +1512,9 @@ def main():
             st.rerun()
 
         # Tab labels per request
-        tabs = ["Dashboard", "Documents", "Document Management", "Contract Management"]
+        tabs = ["Docs Hub", "Document Management", "Contract Management"]
         if role_label == "Viewer":
-            tabs = ["Dashboard", "Documents", "Contract Management"]
+            tabs = ["Docs Hub", "Contract Management"]
         if user["role"] == "admin":
             tabs += ["Deleted Files", "Audit Logs", "Compliance", "User Management"]
 
@@ -1455,9 +1531,7 @@ def main():
 
         t = st.tabs(tabs)
         with t[0]:
-            page_dashboard(con, user)
-        with t[tabs.index("Documents")]:
-            page_documents(con, user)
+            page_docs_hub(con, user)
         if "Document Management" in tabs:
             with t[tabs.index("Document Management")]:
                 page_upload(con, user)
