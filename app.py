@@ -490,6 +490,22 @@ def title_case_role(val: str) -> str:
 def rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     return df.rename(columns=mapping)
 
+def _latest_versions_df(con, doc_type):
+    q = """
+    SELECT * FROM documents d
+    WHERE d.is_deleted=0 AND d.doc_type=?
+      AND d.version = (
+        SELECT MAX(version) FROM documents d2
+        WHERE d2.is_deleted=0 AND d2.doc_type=d.doc_type AND d2.name=d.name
+      )
+    ORDER BY name COLLATE NOCASE
+    """
+    df = pd.read_sql(q, con, params=(doc_type,))
+    if df.empty:
+        return df
+    return versions_with_links(con, df)
+
+
 # ===================================================================
 #                                PAGES
 # ===================================================================
@@ -1015,43 +1031,39 @@ def page_manage_users(con, user):
 # ============== New: Dashboard, Compliance (Integrity, Tokens, Audit Pack) ==============
 
 
+
 def page_dashboard(con, user):
     st.subheader("Overview")
 
+    # Load data
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
     contracts = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
     logs = pd.read_sql("SELECT ts,actor,action,doc_id,details FROM audit_log ORDER BY ts DESC", con)
 
-    # Use UTC-aware timestamps everywhere to avoid invalid comparisons
-    now_utc = pd.Timestamp.utcnow().tz_localize("UTC")
+    # UTC-safe timestamps
+    now_utc = pd.Timestamp.now(tz="UTC")
     last30_utc = now_utc - pd.Timedelta(days=30)
 
-    # Robust parsing in case DB has mixed tz/naive strings
+    # Robust parsing
     docs_up = pd.to_datetime(docs.get("upload_date"), utc=True, errors="coerce")
     cons_up = pd.to_datetime(contracts.get("upload_date"), utc=True, errors="coerce")
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Documents", len(docs))
-    col2.metric("Contracts", len(contracts))
-    col3.metric("Versions", int(docs.get("version", pd.Series(dtype="float")).fillna(0).astype(float).sum() +
-                                 contracts.get("version", pd.Series(dtype="float")).fillna(0).astype(float).sum()))
-    col4.metric("New (30d)", int((docs_up >= last30_utc).sum() + (cons_up >= last30_utc).sum()))
+    # Top-level metrics
+    colA, colB, colC, colD = st.columns(4)
+    colA.metric("Documents (all versions)", int(len(docs)))
+    colB.metric("Contracts (all versions)", int(len(contracts)))
+    colC.metric("Unique docs", int(docs[["doc_type","name"]].drop_duplicates().shape[0]))
+    colD.metric("New last 30 days", int((docs_up >= last30_utc).sum() + (cons_up >= last30_utc).sum()))
 
-    # Expiring soon
-    contracts["days_to_expiry"] = _days_to_expiry(contracts["end_date"])
-    exp_60 = contracts[(contracts["days_to_expiry"] >= 0) & (contracts["days_to_expiry"] <= 60)]
-    st.markdown("### Expiring within 60 days")
-    st.dataframe(exp_60[["vendor","name","end_date","days_to_expiry","status","uploaded_by"]],
-                 use_container_width=True)
+    # Counts by type (distinct names)
+    distinct_docs = docs[["doc_type","name"]].drop_duplicates()
+    counts = distinct_docs["doc_type"].value_counts().to_dict()
+    sops = counts.get("SOP", 0); brds = counts.get("BRD", 0); polic = counts.get("Policy", 0)
 
-    # Most viewed (last 30 days)
-    log_ts = pd.to_datetime(logs.get("ts"), utc=True, errors="coerce")
-    last30_logs = logs[log_ts >= last30_utc]
-    top_views = (last30_logs[last30_logs["action"]=="VIEW"]
-                 .groupby("doc_id").size().reset_index(name="views")
-                 .sort_values("views", ascending=False).head(10))
-    st.markdown("### Most viewed (last 30 days)")
-    st.dataframe(top_views, use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("SOPs", int(sops))
+    c2.metric("BRDs", int(brds))
+    c3.metric("Policies", int(polic))
 
     # Uploads over time
     def _bucket(df, label):
@@ -1068,6 +1080,74 @@ def page_dashboard(con, user):
     if not trend.empty:
         st.markdown("### Uploads over time")
         st.line_chart(trend.pivot_table(index="date", columns="type", values="count", fill_value=0))
+
+    # Expiring soon
+    contracts["days_to_expiry"] = _days_to_expiry(contracts["end_date"])
+    exp_60 = contracts[(contracts["days_to_expiry"] >= 0) & (contracts["days_to_expiry"] <= 60)]
+    with st.expander("Contracts expiring in the next 60 days", expanded=False):
+        st.dataframe(exp_60[["vendor","name","end_date","days_to_expiry","status","uploaded_by"]],
+                     use_container_width=True)
+
+    # Most viewed docs (last 30 days)
+    log_ts = pd.to_datetime(logs.get("ts"), utc=True, errors="coerce")
+    last30_logs = logs[log_ts >= last30_utc]
+    top_views = (last30_logs[last30_logs["action"]=="VIEW"]
+                 .groupby("doc_id").size().reset_index(name="views")
+                 .sort_values("views", ascending=False).head(10))
+    with st.expander("Most viewed items (last 30 days)", expanded=False):
+        st.dataframe(top_views, use_container_width=True)
+
+    # By document type with full "view all" lists (latest version only)
+    st.markdown("### By document type")
+    tabs = st.tabs(["SOPs", "BRDs", "Policies"])
+    # SOPs
+    with tabs[0]:
+        df = _latest_versions_df(con, "SOP")
+        if df.empty:
+            st.info("No SOPs found.")
+        else:
+            show = df[["name","version","approved_by","upload_date","uploaded_by","remarks","Document Link","Approval Link"]]
+            show = rename_columns(show, {
+                "name":"Name","version":"Version","approved_by":"Approved By","upload_date":"Uploaded On",
+                "uploaded_by":"Uploaded By","remarks":"Remarks"
+            })
+            st.data_editor(
+                show, use_container_width=True, disabled=True,
+                column_config={"Document Link": st.column_config.LinkColumn("Document Link"),
+                               "Approval Link": st.column_config.LinkColumn("Approval Link")}
+            )
+    # BRDs
+    with tabs[1]:
+        df = _latest_versions_df(con, "BRD")
+        if df.empty:
+            st.info("No BRDs found.")
+        else:
+            show = df[["name","version","approved_by","upload_date","uploaded_by","remarks","Document Link","Approval Link"]]
+            show = rename_columns(show, {
+                "name":"Name","version":"Version","approved_by":"Approved By","upload_date":"Uploaded On",
+                "uploaded_by":"Uploaded By","remarks":"Remarks"
+            })
+            st.data_editor(
+                show, use_container_width=True, disabled=True,
+                column_config={"Document Link": st.column_config.LinkColumn("Document Link"),
+                               "Approval Link": st.column_config.LinkColumn("Approval Link")}
+            )
+    # Policies
+    with tabs[2]:
+        df = _latest_versions_df(con, "Policy")
+        if df.empty:
+            st.info("No Policies found.")
+        else:
+            show = df[["name","version","approved_by","upload_date","uploaded_by","remarks","Document Link","Approval Link"]]
+            show = rename_columns(show, {
+                "name":"Name","version":"Version","approved_by":"Approved By","upload_date":"Uploaded On",
+                "uploaded_by":"Uploaded By","remarks":"Remarks"
+            })
+            st.data_editor(
+                show, use_container_width=True, disabled=True,
+                column_config={"Document Link": st.column_config.LinkColumn("Document Link"),
+                               "Approval Link": st.column_config.LinkColumn("Approval Link")}
+            )
 
 
 def _parse_retention_to_days(val: str) -> int | None:
