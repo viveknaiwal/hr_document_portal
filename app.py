@@ -1014,30 +1014,39 @@ def page_manage_users(con, user):
 
 # ============== New: Dashboard, Compliance (Integrity, Tokens, Audit Pack) ==============
 
+
 def page_dashboard(con, user):
     st.subheader("Overview")
 
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
     contracts = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
     logs = pd.read_sql("SELECT ts,actor,action,doc_id,details FROM audit_log ORDER BY ts DESC", con)
-    now = pd.Timestamp.utcnow()
-    last30 = now - pd.Timedelta(days=30)
+
+    # Use UTC-aware timestamps everywhere to avoid invalid comparisons
+    now_utc = pd.Timestamp.utcnow().tz_localize("UTC")
+    last30_utc = now_utc - pd.Timedelta(days=30)
+
+    # Robust parsing in case DB has mixed tz/naive strings
+    docs_up = pd.to_datetime(docs.get("upload_date"), utc=True, errors="coerce")
+    cons_up = pd.to_datetime(contracts.get("upload_date"), utc=True, errors="coerce")
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Documents", len(docs))
     col2.metric("Contracts", len(contracts))
-    col3.metric("Versions", int(docs.get("version", pd.Series()).fillna(0).sum() + contracts.get("version", pd.Series()).fillna(0).sum()))
-    col4.metric("New (30d)", int((pd.to_datetime(docs["upload_date"]) >= last30).sum() +
-                                 (pd.to_datetime(contracts["upload_date"]) >= last30).sum()))
+    col3.metric("Versions", int(docs.get("version", pd.Series(dtype="float")).fillna(0).astype(float).sum() +
+                                 contracts.get("version", pd.Series(dtype="float")).fillna(0).astype(float).sum()))
+    col4.metric("New (30d)", int((docs_up >= last30_utc).sum() + (cons_up >= last30_utc).sum()))
 
+    # Expiring soon
     contracts["days_to_expiry"] = _days_to_expiry(contracts["end_date"])
     exp_60 = contracts[(contracts["days_to_expiry"] >= 0) & (contracts["days_to_expiry"] <= 60)]
     st.markdown("### Expiring within 60 days")
     st.dataframe(exp_60[["vendor","name","end_date","days_to_expiry","status","uploaded_by"]],
                  use_container_width=True)
 
-    # Most viewed (from logs)
-    last30_logs = logs[pd.to_datetime(logs["ts"]) >= last30]
+    # Most viewed (last 30 days)
+    log_ts = pd.to_datetime(logs.get("ts"), utc=True, errors="coerce")
+    last30_logs = logs[log_ts >= last30_utc]
     top_views = (last30_logs[last30_logs["action"]=="VIEW"]
                  .groupby("doc_id").size().reset_index(name="views")
                  .sort_values("views", ascending=False).head(10))
@@ -1048,8 +1057,8 @@ def page_dashboard(con, user):
     def _bucket(df, label):
         if df.empty: return pd.DataFrame(columns=["date","type","count"])
         tmp = df.copy()
-        tmp["date"] = pd.to_datetime(tmp["upload_date"]).dt.date
-        tmp = tmp.groupby(["date"]).size().reset_index(name="count")
+        tmp_dates = pd.to_datetime(tmp["upload_date"], utc=True, errors="coerce").dt.tz_convert(None).dt.date
+        tmp = tmp.assign(date=tmp_dates).groupby(["date"]).size().reset_index(name="count")
         tmp["type"] = label
         return tmp
 
@@ -1059,6 +1068,7 @@ def page_dashboard(con, user):
     if not trend.empty:
         st.markdown("### Uploads over time")
         st.line_chart(trend.pivot_table(index="date", columns="type", values="count", fill_value=0))
+
 
 def _parse_retention_to_days(val: str) -> int | None:
     if not val: return None
