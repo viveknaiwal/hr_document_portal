@@ -2108,7 +2108,8 @@ def main():
             page_dashboard(con, user)
         with t[1]:
             page_documents(con, user)
-if "Document Management" in tabs:
+
+        if "Document Management" in tabs:
             with t[tabs.index("Document Management")]:
                 page_upload(con, user)
         if "Contract Management" in tabs:
@@ -2126,6 +2127,7 @@ if "Document Management" in tabs:
         if "User Management" in tabs:
             with t[tabs.index("User Management")]:
                 page_manage_users(con, user)
+
 
 if __name__ == "__main__":
     main()
