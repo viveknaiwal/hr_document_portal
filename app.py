@@ -23,6 +23,27 @@ import os
 # 🔵 Load CSS (Figma export) — tolerant if file missing
 def load_css():
     try:
+        base_css = """
+/* KPI cards */
+.kpi-grid {display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0}
+.kpi {border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.kpi .label{font-size:.85rem;color:#6b7280;margin-bottom:6px}
+.kpi .value{font-size:1.6rem;font-weight:600;color:#111827}
+
+/* Section titles */
+.h-section{margin-top:18px;margin-bottom:8px;font-weight:700;font-size:1.25rem}
+
+/* Login styles */
+.login-card{max-width:380px;margin:8vh auto;padding:28px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;box-shadow:0 10px 25px rgba(0,0,0,.08)}
+.login-title{font-weight:700;font-size:1.5rem;text-align:center;margin-bottom:12px}
+.stButton>button.login-primary{background:#111;color:#fff;border:1px solid #111;border-radius:9999px;padding:.6rem 1rem}
+.stButton>button.login-primary:hover{filter:brightness(1.05)}
+.stButton>button.login-secondary{background:#fff;color:#111;border:1px solid #111;border-radius:9999px;padding:.6rem 1rem}
+
+/* Tables */
+.small-caption{color:#6b7280;font-size:.85rem}
+"""
+        st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
         with open("style.css") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     except FileNotFoundError:
@@ -490,6 +511,9 @@ def title_case_role(val: str) -> str:
 def rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     return df.rename(columns=mapping)
 
+def kpi_card(label: str, value) -> str:
+    return f'<div class="kpi"><div class="label">{label}</div><div class="value">{value}</div></div>'
+
 def _latest_versions_df(con, doc_type):
     q = """
     SELECT * FROM documents d
@@ -741,7 +765,7 @@ def page_documents(con, user):
             delete_version_ui(entity="document", table="documents", versions_df=versions, con=con, user=user)
 
 
-def page_docs_hub(con, user):
+def page_dashboard(con, user):
     st.subheader("Docs Hub")
 
     # Load
@@ -994,40 +1018,53 @@ def page_deleted(con, user):
                     restore_record(con, "contracts", int(selc), user["username"], restore_reason_c.strip())
                     st.success("Restored"); st.rerun()
 
+
 def page_audit(con, user=None):
     st.subheader("Audit Logs")
+
+    # Filters
     df = pd.read_sql("SELECT * FROM audit_log ORDER BY ts DESC", con)
     if df.empty:
-        st.info("No logs"); return
-
-    # Friendly display names
-    df_display = rename_columns(
-        df.rename(columns={"actor": "User"}),
-        {"ts": "Timestamp (UTC)", "action": "Action", "doc_id": "Record ID", "details": "Details",
-         "ip": "IP", "user_agent": "User Agent", "token": "Token", "table_name": "Table"}
-    )
-
-    col1, col2 = st.columns([2, 3])
-    with col1:
-        pick_actions = st.multiselect(
-            "Filter Actions",
-            sorted(df_display["Action"].unique().tolist()),
-            default=[]
+        st.info("No logs"); 
+        # Still allow pack generation with empty logs
+    else:
+        df_display = rename_columns(
+            df.rename(columns={"actor": "User"}),
+            {"ts": "Timestamp (UTC)", "action": "Action", "doc_id": "Record ID", "details": "Details",
+             "ip": "IP", "user_agent": "User Agent", "token": "Token", "table_name": "Table"}
         )
-    with col2:
-        q = st.text_input("Search User/Details")
+        col1, col2 = st.columns([2, 3])
+        with col1:
+            pick_actions = st.multiselect(
+                "Filter Actions",
+                sorted(df_display["Action"].unique().tolist()),
+                default=[]
+            )
+        with col2:
+            q = st.text_input("Search User/Details")
 
-    f = df_display.copy()
-    if pick_actions:
-        f = f[f["Action"].isin(pick_actions)]
-    if q:
-        ql = q.lower()
-        f = f[f["User"].str.lower().str.contains(ql) | f["Details"].str.lower().str.contains(ql)]
+        f = df_display.copy()
+        if pick_actions:
+            f = f[f["Action"].isin(pick_actions)]
+        if q:
+            ql = q.lower()
+            f = f[f["User"].str.lower().str.contains(ql) | f["Details"].str.lower().str.contains(ql)]
 
-    st.download_button("⬇️ Export CSV", f.to_csv(index=False).encode(), "audit_logs.csv")
-    buf = BytesIO(); f.to_excel(buf, index=False)
-    st.download_button("⬇️ Export Excel", buf.getvalue(), "audit_logs.xlsx")
-    st.dataframe(f, use_container_width=True)
+        st.download_button("⬇️ Export CSV", f.to_csv(index=False).encode(), "audit_logs.csv")
+        buf = BytesIO(); f.to_excel(buf, index=False)
+        st.download_button("⬇️ Export Excel", buf.getvalue(), "audit_logs.xlsx")
+        st.dataframe(f, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("#### Audit Pack (self-serve for auditors)")
+    c1, c2 = st.columns(2)
+    with c1: start = st.date_input("Start", dt.date.today().replace(day=1))
+    with c2: end = st.date_input("End", dt.date.today())
+    if st.button("Generate Audit Pack"):
+        data = generate_audit_pack(con, pd.Timestamp(start), pd.Timestamp(end))
+        st.download_button("⬇️ Download Audit Pack", data, file_name=f"audit_pack_{start}_{end}.zip")
+        st.caption("The audit pack includes audit logs (CSV) and current metadata snapshots of documents and contracts.")
+
 
 def page_manage_users(con, user):
     if user["role"] != "admin":
@@ -1321,145 +1358,37 @@ def generate_audit_pack(con, start, end):
         z.writestr("readme.txt", b"Audit Pack: logs + current metadata snapshots. Generated by HR Document Portal.")
     return zbuf.getvalue()
 
+
 def page_compliance(con, user):
-    st.subheader("Compliance & Integrity")
+    st.subheader("Compliance")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Verify hashes now"):
-            out = verify_integrity(con)
-            if out.empty:
-                st.success("All good. No mismatches.")
-            else:
-                st.error(f"{len(out)} issues found")
-                st.dataframe(out, use_container_width=True)
-    with c2:
-        s = st.session_state.get("last_audit_pack_status", "")
-        if s: st.info(s)
+    st.markdown("**File integrity check**")
+    if st.button("Recompute & verify file hashes now"):
+        out = verify_integrity(con)
+        if out.empty:
+            st.success("All good. No mismatches.")
+        else:
+            st.error(f"{len(out)} issues found")
+            st.dataframe(out, use_container_width=True)
+    st.caption("Re-hashes stored files and compares to the hash captured at upload to detect tampering or corruption.")
 
-    st.markdown("### Token Health")
+    st.markdown("---")
+    st.markdown("**Link health (token status)**")
     th = token_health(con)
     if th.empty:
         st.info("No tokens found.")
     else:
         st.dataframe(th, use_container_width=True)
+    st.caption("Shows whether share links are active, expiring soon, expired, or missing an expiry. You can revoke by rotating tokens on a document.")
 
-    st.markdown("### Retention Exceptions (eligible to purge)")
+    st.markdown("---")
+    st.markdown("**Retention review**")
     rx = retention_exceptions(con)
     if rx.empty:
         st.success("No retention exceptions.")
     else:
         st.dataframe(rx, use_container_width=True)
-
-    st.markdown("### Audit Pack")
-    cc1, cc2 = st.columns(2)
-    with cc1: start = st.date_input("Start", dt.date.today().replace(day=1))
-    with cc2: end = st.date_input("End", dt.date.today())
-    if st.button("Generate Audit Pack"):
-        data = generate_audit_pack(con, pd.Timestamp(start), pd.Timestamp(end))
-        st.download_button("⬇️ Download Audit Pack", data, file_name=f"audit_pack_{start}_{end}.zip")
-        st.session_state["last_audit_pack_status"] = f"Generated for {start} to {end}"
-
-# ===================================================================
-#                         LOGIN UI (NEW) — ONLY HEADER HIDDEN
-# ===================================================================
-def style_login():
-    """CSS scoped to the login page."""
-    st.markdown("""
-    <style>
-      header[data-testid="stHeader"] { display:none !important; }
-      #MainMenu, .stDeployButton, footer { visibility:hidden; }
-    </style>
-    """, unsafe_allow_html=True)
-
-def login_view():
-    """Render login form and return (submitted, email, password, keep)."""
-    style_login()
-    col_l, col_c, col_r = st.columns([1, 1, 1])
-    with col_c:
-        with st.form("login_form", clear_on_submit=False):
-            st.title(APP_TITLE)
-            u = st.text_input("Email", key="login_email")
-            p = st.text_input("Password", type="password", key="login_pwd")
-            keep = st.checkbox("Keep me signed in on this device", value=True)
-            submitted = st.form_submit_button("Login", use_container_width=True)
-    return submitted, u, p, keep
-
-# ===================================================================
-#                           SERVE MODE HANDLER
-# ===================================================================
-def _get_client_info():
-    # Streamlit doesn't expose headers reliably; store placeholders
-    return {"ip": st.session_state.get("_client_ip",""), "ua": st.session_state.get("_client_ua","")}
-
-def handle_serve_mode():
-    if "serve" not in st.query_params:
-        return False
-    token = st.query_params["serve"]
-    con = init_db()
-
-    target_ref = None
-    found_table, found_id = None, None
-
-    def _not_expired(exp):
-        if not exp: return True  # tolerate if missing
-        try:
-            return dt.datetime.fromisoformat(exp) >= dt.datetime.utcnow()
-        except Exception:
-            return True
-
-    for rid, fp, ep, ft, et, fexp, eexp in con.execute(
-        "SELECT id,file_path,email_path,file_token,email_token,file_token_expires,email_token_expires FROM documents WHERE is_deleted=0"
-    ).fetchall():
-        if token == ft and _not_expired(fexp): target_ref, found_table, found_id = fp, "documents", rid
-        if token == et and _not_expired(eexp): target_ref, found_table, found_id = ep, "documents", rid
-
-    if not target_ref:
-        for rid, fp, ep, ft, et, fexp, eexp in con.execute(
-            "SELECT id,file_path,email_path,file_token,email_token,file_token_expires,email_token_expires FROM contracts WHERE is_deleted=0"
-        ).fetchall():
-            if token == ft and _not_expired(fexp): target_ref, found_table, found_id = fp, "contracts", rid
-            if token == et and _not_expired(eexp): target_ref, found_table, found_id = ep, "contracts", rid
-
-    if not target_ref or not ref_exists(target_ref):
-        st.error("File not found or link expired"); st.stop()
-
-    actor = (st.session_state.get("user") or {}).get("username", "public")
-    ci = _get_client_info()
-    insert_audit(con, actor, "VIEW", found_id, f"{found_table}:{to_display_name(target_ref)}",
-                 token=token, table_name=found_table, ip=ci["ip"], user_agent=ci["ua"])
-
-    data = read_ref_bytes(target_ref)
-    name = to_display_name(target_ref)
-    mime, _ = mimetypes.guess_type(name)
-
-    st.markdown(f"### {name}")
-
-    if name.lower().endswith(".pdf") and data:
-        if len(data) <= 30_000_000:
-            b64 = base64.b64encode(data).decode()
-            html = f"""
-            <object data="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
-                    type="application/pdf" width="100%" height="820">
-              <embed src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH"
-                     type="application/pdf" />
-              <p>PDF preview failed. <a href="data:application/pdf;base64,{b64}" download="{name}">Download</a>.</p>
-            </object>
-            """
-            st.components.v1.html(html, height=840, scrolling=False)
-        else:
-            st.info("Large PDF — preview disabled. Use Download below.")
-        st.download_button("⬇️ Download", data, name, mime or "application/pdf")
-        st.stop()
-
-    if name.lower().endswith((".png", ".jpg", ".jpeg")) and data:
-        st.image(data, use_container_width=True)
-    elif name.lower().endswith(".txt") and data:
-        st.text(data.decode(errors="replace")[:5000])
-    else:
-        st.info("Preview not supported inline. Use Download below.")
-    st.download_button("⬇️ Download", data, name, mime or "application/octet-stream")
-    st.stop()
+    st.caption("Lists documents past their retention policy and not on legal hold. These are candidates for purge per policy.")
 
 # ===================================================================
 #                                MAIN
@@ -1512,9 +1441,9 @@ def main():
             st.rerun()
 
         # Tab labels per request
-        tabs = ["Docs Hub", "Document Management", "Contract Management"]
+        tabs = ["Dashboard", "Document Management", "Contract Management"]
         if role_label == "Viewer":
-            tabs = ["Docs Hub", "Contract Management"]
+            tabs = ["Dashboard", "Contract Management"]
         if user["role"] == "admin":
             tabs += ["Deleted Files", "Audit Logs", "Compliance", "User Management"]
 
@@ -1531,7 +1460,7 @@ def main():
 
         t = st.tabs(tabs)
         with t[0]:
-            page_docs_hub(con, user)
+            page_dashboard(con, user)
         if "Document Management" in tabs:
             with t[tabs.index("Document Management")]:
                 page_upload(con, user)
