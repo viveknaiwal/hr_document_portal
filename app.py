@@ -1046,10 +1046,8 @@ def page_dashboard(con, user):
         _type_block("BRD")
     with tabs[2]:
         _type_block("Policy")
-
-    st.markdown("---")
-    with st.expander("Browse all documents and versions", expanded=False):
-        page_documents(con, user)
+# (Documents browser lives on the Documents tab — removed here to avoid duplicate widget keys)
+st.caption("Tip: Use the **Documents** tab on the left to browse and filter all versions.")
 
 
     # Load
@@ -1666,10 +1664,8 @@ def page_dashboard(con, user):
         _type_block("BRD")
     with tabs[2]:
         _type_block("Policy")
-
-    st.markdown("---")
-    with st.expander("Browse all documents and versions", expanded=False):
-        page_documents(con, user)
+# (Documents browser lives on the Documents tab — removed here to avoid duplicate widget keys)
+st.caption("Tip: Use the **Documents** tab on the left to browse and filter all versions.")
 
 
     # Load data
