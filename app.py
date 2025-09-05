@@ -60,6 +60,16 @@ def load_css():
     .stButton>button.login-primary:hover{filter:brightness(1.05)}
     """
     st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
+    st.markdown("""<style>
+    /* Unified primary button style */
+    .stButton > button[kind=\"primary\"], .stDownloadButton > button[kind=\"primary\"] {
+        background:#2563EB; color:#fff; border:1px solid #2563EB; border-radius:9999px; padding:.5rem 1rem;
+    }
+    .stButton > button[kind=\"primary\"]:hover, .stDownloadButton > button[kind=\"primary\"]:hover {
+        filter:brightness(1.05);
+    }
+    </style>""", unsafe_allow_html=True)
+
     try:
         with open("style.css", "r", encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
@@ -704,7 +714,7 @@ def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con
     st.markdown("#### Delete")
     sel_v = st.selectbox("Version to delete", versions_df["version"].tolist(), key=f"del_{entity}_v")
     reason = st.text_input("Reason (required)", key=f"del_{entity}_reason", help="This will be recorded in the Audit Logs.")
-    if st.button("Delete Version", key=f"btn_del_{entity}"):
+    if st.button("Delete Version", key=f"btn_del_{entity}", type="primary"):
         if not reason.strip():
             st.error("Please enter a reason."); return
         row_id = int(versions_df.loc[versions_df["version"] == sel_v, "id"].iloc[0])
@@ -842,7 +852,7 @@ def page_upload(con, user):
         remarks = st.text_area("Remarks / Context *", height=100, key="up_remarks")
         doc = st.file_uploader("Key Document *", key="up_doc")
         email = st.file_uploader("Approval/Email Attachment (optional)", key="up_email")
-        ok = st.form_submit_button("Upload")
+        ok = st.form_submit_button("Upload", type="primary")
 
     if ok:
         if not name or not doc or not remarks.strip():
@@ -892,7 +902,7 @@ def page_contracts(con, user):
             remarks = st.text_area("Remarks / Context *", height=100, key="c_remarks")
             doc = st.file_uploader("Contract File (PDF/Doc) *", key="c_doc")
             email = st.file_uploader("Approval/Email Attachment (optional)", key="c_email")
-            ok = st.form_submit_button("Upload Contract")
+            ok = st.form_submit_button("Upload Contract", type="primary")
 
         if ok:
             if not name or not vendor or not doc or not remarks.strip():
@@ -1002,7 +1012,7 @@ def page_deleted(con, user):
             ), use_container_width=True)
             if user["role"] == "admin":
                 sel = st.selectbox("Restore Document ID", df["id"], key="docs_restore_id")
-                if st.button("Restore", key="docs_restore_btn"):
+                if st.button("Restore", key="docs_restore_btn", type="primary"):
                     con.execute("UPDATE documents SET is_deleted=0 WHERE id=?", (int(sel),))
                     con.commit()
                     insert_audit(con, user["username"], "RESTORE_DOC", int(sel))
@@ -1020,7 +1030,7 @@ def page_deleted(con, user):
             ), use_container_width=True)
             if user["role"] == "admin":
                 selc = st.selectbox("Restore Contract ID", dfc["id"], key="contracts_restore_id")
-                if st.button("Restore Contract", key="contracts_restore_btn"):
+                if st.button("Restore Contract", key="contracts_restore_btn", type="primary"):
                     con.execute("UPDATE contracts SET is_deleted=0 WHERE id=?", (int(selc),))
                     con.commit()
                     insert_audit(con, user["username"], "RESTORE_CONTRACT", int(selc))
@@ -1081,7 +1091,7 @@ def page_audit(con, user=None):
     c1, c2 = st.columns(2)
     with c1: start = st.date_input("Start", dt.date.today().replace(day=1), key="audit_pack_start")
     with c2: end = st.date_input("End", dt.date.today(), key="audit_pack_end")
-    if st.button("Generate Audit Pack", key="audit_pack_btn"):
+    if st.button("Generate Audit Pack", key="audit_pack_btn", type="primary"):
         data = generate_audit_pack(con, pd.Timestamp(start), pd.Timestamp(end))
         st.download_button("⬇️ Download Audit Pack", data, file_name=f"audit_pack_{start}_{end}.zip", key="audit_pack_dl")
         st.caption("Includes audit logs in range, and current snapshots of documents and contracts.")
@@ -1175,7 +1185,7 @@ def page_compliance(con, user):
     st.subheader("Compliance")
 
     st.markdown("**File integrity check**")
-    if st.button("Recompute & verify file hashes now", key="cmp_hash_btn"):
+    if st.button("Recompute & verify file hashes now", key="cmp_hash_btn", type="primary"):
         out = verify_integrity(con)
         if out.empty:
             st.success("All good. No mismatches.")
@@ -1237,7 +1247,7 @@ def page_manage_users(con, user):
 
     if not df.empty:
         del_id = st.selectbox("Delete User ID", df["ID"], key="u_del_id")
-        if st.button("Delete User", key="u_del_btn"):
+        if st.button("Delete User", key="u_del_btn", type="primary"):
             target_email = df[df["ID"] == del_id]["Email"].iloc[0]
             if target_email == user["username"]:
                 st.error("You cannot delete yourself.")
@@ -1258,23 +1268,19 @@ def style_login():
     </style>
     """, unsafe_allow_html=True)
 
+
 def login_view():
     style_login()
-    st.markdown('<div class="login-card">', unsafe_allow_html=True)
-    st.markdown('<div class="login-title">HR Document Portal</div>', unsafe_allow_html=True)
-    with st.form("login_form", clear_on_submit=False):
-        u = st.text_input("Email", key="login_email")
-        p = st.text_input("Password", type="password", key="login_pwd")
-        keep = st.checkbox("Keep me signed in on this device", value=True, key="login_keep")
-        submitted = st.form_submit_button("Login", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <script>
-    const btns = window.parent.document.querySelectorAll('button[kind="primary"]');
-    btns.forEach(b => { b.classList.add('login-primary'); });
-    </script>
-    """, unsafe_allow_html=True)
+    col_l, col_c, col_r = st.columns([1, 1, 1])
+    with col_c:
+        with st.form("login_form", clear_on_submit=False):
+            st.title(APP_TITLE)
+            u = st.text_input("Email", key="login_email")
+            p = st.text_input("Password", type="password", key="login_pwd")
+            keep = st.checkbox("Keep me signed in on this device", value=True, key="login_keep")
+            submitted = st.form_submit_button("Login", use_container_width=True, type="primary", key="login_submit")
     return submitted, u, p, keep
+
 
 # ------------------------------ Main ---------------------------------
 
