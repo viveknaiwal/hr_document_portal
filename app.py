@@ -1,14 +1,16 @@
+
 # app.py
 # ------------------------------------------------------------------
-# HR Document Portal — Streamlit
+# HR Document Portal — Streamlit (enhanced with Dashboard & Compliance)
 # - Users, roles, audit log
 # - SOP/BRD/Policy + Contract Management (versioned, view links)
 # - Storage backends (priority): Google Drive -> Dropbox -> Local
 # - 30-day "stay signed in" token via URL ?auth=... (survives reload)
 # - Robust PDF viewer with base64 <object>/<embed> + download fallback
+# - New: Dashboard, Integrity checks, Token health, Audit Pack generator
 # ------------------------------------------------------------------
 
-import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
+import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile, json
 from pathlib import Path
 from io import BytesIO
 import pandas as pd
@@ -18,10 +20,13 @@ APP_TITLE = "HR Document Portal"
 
 import os
 
-# 🔵 Load CSS (Figma export)
+# 🔵 Load CSS (Figma export) — tolerant if file missing
 def load_css():
-    with open("style.css") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    try:
+        with open("style.css") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except FileNotFoundError:
+        pass
 
 # ---------------- Local storage (fallback when no cloud available)
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
@@ -274,6 +279,7 @@ def init_db():
         """
     )
 
+    # Ensure default admin
     cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
     if cur.fetchone()[0] == 0:
         default_admin = st.secrets.get("DEFAULT_ADMIN_EMAIL", "admin@cars24.com").lower()
@@ -284,14 +290,48 @@ def init_db():
         )
         con.commit()
 
-    # non-breaking schema adds
-    for stmt in [
+    # --- Non-breaking schema adds ---
+    alters = [
+        # existing from earlier
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN renewal_notice_days INTEGER",
-    ]:
+        # new: documents
+        "ALTER TABLE documents ADD COLUMN classification TEXT",
+        "ALTER TABLE documents ADD COLUMN owner_email TEXT",
+        "ALTER TABLE documents ADD COLUMN retention_policy TEXT",
+        "ALTER TABLE documents ADD COLUMN legal_hold INTEGER DEFAULT 0",
+        "ALTER TABLE documents ADD COLUMN file_token_expires TEXT",
+        "ALTER TABLE documents ADD COLUMN email_token_expires TEXT",
+        # new: contracts
+        "ALTER TABLE contracts ADD COLUMN risk_rating TEXT",
+        "ALTER TABLE contracts ADD COLUMN auto_renew INTEGER DEFAULT 0",
+        "ALTER TABLE contracts ADD COLUMN currency TEXT",
+        "ALTER TABLE contracts ADD COLUMN annual_value REAL",
+        "ALTER TABLE contracts ADD COLUMN file_token_expires TEXT",
+        "ALTER TABLE contracts ADD COLUMN email_token_expires TEXT",
+        # new: audit_log
+        "ALTER TABLE audit_log ADD COLUMN ip TEXT",
+        "ALTER TABLE audit_log ADD COLUMN user_agent TEXT",
+        "ALTER TABLE audit_log ADD COLUMN token TEXT",
+        "ALTER TABLE audit_log ADD COLUMN table_name TEXT",
+    ]
+    for stmt in alters:
         try:
             cur.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+
+    # Helpful indexes
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_docs_type_name_version ON documents(doc_type, name, version)",
+        "CREATE INDEX IF NOT EXISTS idx_contracts_vendor_name_version ON contracts(vendor, name, version)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_ts_action ON audit_log(ts, action)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor)",
+    ]
+    for ix in indexes:
+        try:
+            cur.execute(ix)
         except sqlite3.OperationalError:
             pass
 
@@ -302,10 +342,10 @@ def backup_db_to_dropbox():
     if USE_DROPBOX and LOCAL_DB_PATH.exists():
         dbx_upload_bytes(dbx_path("db", "hr_docs.db"), LOCAL_DB_PATH.read_bytes())
 
-def insert_audit(con, actor, action, doc_id=None, details=""):
+def insert_audit(con, actor, action, doc_id=None, details="", token=None, table_name=None, ip=None, user_agent=None):
     con.execute(
-        "INSERT INTO audit_log(ts,actor,action,doc_id,details) VALUES (?,?,?,?,?)",
-        (dt.datetime.utcnow().isoformat(), actor, action, doc_id, details),
+        "INSERT INTO audit_log(ts,actor,action,doc_id,details,token,table_name,ip,user_agent) VALUES (?,?,?,?,?,?,?,?,?)",
+        (dt.datetime.utcnow().isoformat(), actor, action, doc_id, details, token, table_name, ip, user_agent),
     )
     con.commit()
     backup_db_to_dropbox()
@@ -354,35 +394,51 @@ def sha256_bytes(b):
 def gen_token():
     return secrets.token_urlsafe(16)
 
-def ensure_tokens(con, row_id, email_exists):
-    cur = con.execute("SELECT file_token,email_token FROM documents WHERE id=?", (row_id,))
+def _default_token_expiry(days=7):
+    return (dt.datetime.utcnow() + dt.timedelta(days=days)).isoformat()
+
+def ensure_tokens(con, row_id, email_exists, days=7):
+    # Ensure tokens and expiries exist
+    cur = con.execute("SELECT file_token,email_token,file_token_expires,email_token_expires FROM documents WHERE id=?", (row_id,))
     row = cur.fetchone()
     if not row:
         return None, None
-    ft, et = row
+    ft, et, fexp, eexp = row
     changed = False
     if not ft:
         ft = gen_token(); changed = True
         con.execute("UPDATE documents SET file_token=? WHERE id=?", (ft, row_id))
+    if not fexp:
+        fexp = _default_token_expiry(days); changed = True
+        con.execute("UPDATE documents SET file_token_expires=? WHERE id=?", (fexp, row_id))
     if email_exists and not et:
         et = gen_token(); changed = True
         con.execute("UPDATE documents SET email_token=? WHERE id=?", (et, row_id))
+    if email_exists and not eexp:
+        eexp = _default_token_expiry(days); changed = True
+        con.execute("UPDATE documents SET email_token_expires=? WHERE id=?", (eexp, row_id))
     if changed:
         con.commit(); backup_db_to_dropbox()
     return ft, et
 
-def ensure_tokens_generic(con, table, row_id, email_exists):
-    cur = con.execute(f"SELECT file_token,email_token FROM {table} WHERE id=?", (row_id,))
+def ensure_tokens_generic(con, table, row_id, email_exists, days=7):
+    cur = con.execute(f"SELECT file_token,email_token,file_token_expires,email_token_expires FROM {table} WHERE id=?", (row_id,))
     row = cur.fetchone()
     if not row:
         return None, None
-    ft, et = row; changed = False
+    ft, et, fexp, eexp = row; changed = False
     if not ft:
         ft = gen_token(); changed = True
         con.execute(f"UPDATE {table} SET file_token=? WHERE id=?", (ft, row_id))
+    if not fexp:
+        fexp = _default_token_expiry(days); changed = True
+        con.execute(f"UPDATE {table} SET file_token_expires=? WHERE id=?", (fexp, row_id))
     if email_exists and not et:
         et = gen_token(); changed = True
         con.execute(f"UPDATE {table} SET email_token=? WHERE id=?", (et, row_id))
+    if email_exists and not eexp:
+        eexp = _default_token_expiry(days); changed = True
+        con.execute(f"UPDATE {table} SET email_token_expires=? WHERE id=?", (eexp, row_id))
     if changed:
         con.commit(); backup_db_to_dropbox()
     return ft, et
@@ -406,7 +462,7 @@ def soft_delete_record(con, table: str, row_id: int, actor: str, reason: str = "
     con.execute(f"UPDATE {table} SET is_deleted=1 WHERE id=?", (row_id,))
     con.commit()
     action = "DELETE_CONTRACT" if table == "contracts" else "DELETE_DOC"
-    insert_audit(con, actor, action, row_id, details=f"table={table};id={row_id};reason={reason}")
+    insert_audit(con, actor, action, row_id, details=f"table={table};id={row_id};reason={reason}", table_name=table)
     backup_db_to_dropbox()
 
 def restore_record(con, table: str, row_id: int, actor: str, reason: str = ""):
@@ -416,7 +472,7 @@ def restore_record(con, table: str, row_id: int, actor: str, reason: str = ""):
     det = f"table={table};id={row_id}"
     if reason:
         det += f";reason={reason}"
-    insert_audit(con, actor, action, row_id, details=det)
+    insert_audit(con, actor, action, row_id, details=det, table_name=table)
     backup_db_to_dropbox()
 
 def last_delete_info(con, table: str, row_id: int):
@@ -515,19 +571,24 @@ def page_upload(con, user):
                                                filename="email_" + email.name)
 
         ft, et = gen_token(), (gen_token() if email_ref else None)
+        fexp = _default_token_expiry(7)
+        eexp = _default_token_expiry(7) if email_ref else None
 
         con.execute(
             """INSERT INTO documents
-               (doc_type,name,created_date,upload_date,approved_by,file_path,email_path,version,uploaded_by,hash_sha256,is_deleted,file_token,email_token,remarks)
-               VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+               (doc_type,name,created_date,upload_date,approved_by,file_path,email_path,version,uploaded_by,hash_sha256,
+                is_deleted,file_token,email_token,remarks,file_token_expires,email_token_expires)
+               VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?, ?, ?)""",
             (
                 doc_type, name, str(created_date), dt.datetime.utcnow().isoformat(),
-                approved_by, file_ref, email_ref, version, user["username"], sha256_bytes(data), ft, et, remarks.strip()
+                approved_by, file_ref, email_ref, version, user["username"], sha256_bytes(data),
+                ft, et, remarks.strip(), fexp, eexp
             ),
         )
         con.commit()
         insert_audit(con, user["username"], "UPLOAD",
-                     details=f"Uploaded doc_type={doc_type};name={name};v={version};approved_by='{approved_by}';remarks='{remarks.strip()}'")
+                     details=f"Uploaded doc_type={doc_type};name={name};v={version};approved_by='{approved_by}';remarks='{remarks.strip()}'",
+                     table_name="documents")
         backup_db_to_dropbox()
         st.success(f"Uploaded as version {version}")
 
@@ -700,21 +761,24 @@ def page_contracts(con, user):
                                                    filename="email_" + email.name)
 
             ft, et = gen_token(), (gen_token() if email_ref else None)
+            fexp = _default_token_expiry(7)
+            eexp = _default_token_expiry(7) if email_ref else None
 
             con.execute(
                 """INSERT INTO contracts
                    (name,vendor,owner,status,start_date,end_date,renewal_notice_days,
                     created_date,upload_date,uploaded_by,file_path,email_path,version,hash_sha256,
-                    is_deleted,file_token,email_token,remarks)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+                    is_deleted,file_token,email_token,remarks,file_token_expires,email_token_expires)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?, ?, ?)""",
                 (name, vendor, owner, status, str(start), str(end), int(renewal),
                  str(start), dt.datetime.utcnow().isoformat(), user["username"],
-                 file_ref, email_ref, version, sha256_bytes(data), ft, et, remarks.strip())
+                 file_ref, email_ref, version, sha256_bytes(data), ft, et, remarks.strip(), fexp, eexp)
             )
             con.commit()
             insert_audit(con, user["username"], "CONTRACT_UPLOAD",
                          details=f"Uploaded vendor={vendor};name={name};v={version};status={status};"
-                                 f"start={start};end={end};remarks='{remarks.strip()}'")
+                                 f"start={start};end={end};remarks='{remarks.strip()}'",
+                         table_name="contracts")
             backup_db_to_dropbox()
             st.success(f"Contract uploaded as version {version}")
 
@@ -876,7 +940,8 @@ def page_audit(con, user=None):
     # Friendly display names
     df_display = rename_columns(
         df.rename(columns={"actor": "User"}),
-        {"ts": "Timestamp (UTC)", "action": "Action", "doc_id": "Record ID", "details": "Details"}
+        {"ts": "Timestamp (UTC)", "action": "Action", "doc_id": "Record ID", "details": "Details",
+         "ip": "IP", "user_agent": "User Agent", "token": "Token", "table_name": "Table"}
     )
 
     col1, col2 = st.columns([2, 3])
@@ -947,6 +1012,188 @@ def page_manage_users(con, user):
                 backup_db_to_dropbox()
                 st.success("User deleted"); st.rerun()
 
+# ============== New: Dashboard, Compliance (Integrity, Tokens, Audit Pack) ==============
+
+def page_dashboard(con, user):
+    st.subheader("Overview")
+
+    docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
+    contracts = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
+    logs = pd.read_sql("SELECT ts,actor,action,doc_id,details FROM audit_log ORDER BY ts DESC", con)
+    now = pd.Timestamp.utcnow()
+    last30 = now - pd.Timedelta(days=30)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Documents", len(docs))
+    col2.metric("Contracts", len(contracts))
+    col3.metric("Versions", int(docs.get("version", pd.Series()).fillna(0).sum() + contracts.get("version", pd.Series()).fillna(0).sum()))
+    col4.metric("New (30d)", int((pd.to_datetime(docs["upload_date"]) >= last30).sum() +
+                                 (pd.to_datetime(contracts["upload_date"]) >= last30).sum()))
+
+    contracts["days_to_expiry"] = _days_to_expiry(contracts["end_date"])
+    exp_60 = contracts[(contracts["days_to_expiry"] >= 0) & (contracts["days_to_expiry"] <= 60)]
+    st.markdown("### Expiring within 60 days")
+    st.dataframe(exp_60[["vendor","name","end_date","days_to_expiry","status","uploaded_by"]],
+                 use_container_width=True)
+
+    # Most viewed (from logs)
+    last30_logs = logs[pd.to_datetime(logs["ts"]) >= last30]
+    top_views = (last30_logs[last30_logs["action"]=="VIEW"]
+                 .groupby("doc_id").size().reset_index(name="views")
+                 .sort_values("views", ascending=False).head(10))
+    st.markdown("### Most viewed (last 30 days)")
+    st.dataframe(top_views, use_container_width=True)
+
+    # Uploads over time
+    def _bucket(df, label):
+        if df.empty: return pd.DataFrame(columns=["date","type","count"])
+        tmp = df.copy()
+        tmp["date"] = pd.to_datetime(tmp["upload_date"]).dt.date
+        tmp = tmp.groupby(["date"]).size().reset_index(name="count")
+        tmp["type"] = label
+        return tmp
+
+    up_docs = _bucket(docs, "Documents")
+    up_cons = _bucket(contracts, "Contracts")
+    trend = pd.concat([up_docs, up_cons], ignore_index=True)
+    if not trend.empty:
+        st.markdown("### Uploads over time")
+        st.line_chart(trend.pivot_table(index="date", columns="type", values="count", fill_value=0))
+
+def _parse_retention_to_days(val: str) -> int | None:
+    if not val: return None
+    try:
+        v = val.strip().lower()
+        if v.endswith("y"): return int(v[:-1]) * 365
+        if v.endswith("m"): return int(v[:-1]) * 30
+        if v.endswith("d"): return int(v[:-1])
+        return int(v)  # bare days
+    except Exception:
+        return None
+
+def verify_integrity(con):
+    problems = []
+    for table in ["documents", "contracts"]:
+        rows = con.execute(f"SELECT id, file_path, hash_sha256 FROM {table} WHERE is_deleted=0").fetchall()
+        for rid, ref, expected in rows:
+            data = read_ref_bytes(ref)
+            if data is None:
+                problems.append({"table": table, "id": rid, "issue": "Missing file"})
+                continue
+            actual = sha256_bytes(data)
+            if actual != expected:
+                problems.append({"table": table, "id": rid, "issue": "Hash mismatch"})
+    return pd.DataFrame(problems)
+
+def token_health(con):
+    recs = []
+    now = dt.datetime.utcnow()
+    for table in ["documents", "contracts"]:
+        rows = pd.read_sql(f"SELECT id,name,COALESCE(vendor,'') as vendor,file_token,email_token,file_token_expires,email_token_expires FROM {table} WHERE is_deleted=0", con)
+        for r in rows.itertuples():
+            for kind, tok, exp in [("file", r.file_token, r.file_token_expires), ("email", r.email_token, r.email_token_expires)]:
+                if not tok: continue
+                status = "ok"
+                if not exp:
+                    status = "no-expiry"
+                else:
+                    try:
+                        exp_dt = dt.datetime.fromisoformat(exp)
+                        if exp_dt < now: status = "expired"
+                        elif exp_dt - now <= dt.timedelta(days=3): status = "expiring-soon"
+                    except Exception:
+                        status = "bad-expiry"
+                recs.append({
+                    "table": table, "id": r.id, "name": r.name, "vendor": r.vendor if hasattr(r,'vendor') else "",
+                    "token_type": kind, "status": status, "expires": exp or ""
+                })
+    return pd.DataFrame(recs)
+
+def retention_exceptions(con):
+    docs = pd.read_sql("SELECT id,name,doc_type,created_date,retention_policy,legal_hold FROM documents WHERE is_deleted=0", con)
+    if docs.empty: return pd.DataFrame(columns=["id","name","doc_type","created_date","retention_policy","legal_hold","days_over"])
+    docs["created_date"] = pd.to_datetime(docs["created_date"], errors="coerce")
+    out = []
+    today = pd.Timestamp.today()
+    for r in docs.itertuples():
+        if getattr(r, "legal_hold", 0) == 1:  # skip
+            continue
+        days = _parse_retention_to_days(getattr(r, "retention_policy", ""))
+        if not days: 
+            continue
+        if pd.isna(r.created_date):
+            continue
+        age_days = (today - r.created_date).days
+        if age_days > days:
+            out.append({
+                "id": r.id, "name": r.name, "doc_type": r.doc_type,
+                "created_date": str(r.created_date.date()), "retention_policy": r.retention_policy,
+                "legal_hold": r.legal_hold, "days_over": age_days - days
+            })
+    return pd.DataFrame(out)
+
+def generate_audit_pack(con, start, end):
+    # 1) Logs
+    df = pd.read_sql(
+        "SELECT * FROM audit_log WHERE ts BETWEEN ? AND ? ORDER BY ts ASC",
+        con, params=(start.isoformat(), end.isoformat()))
+    buf_logs = BytesIO(); df.to_csv(buf_logs, index=False); buf_logs.seek(0)
+
+    # 2) Current metadata snapshots
+    docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
+    cons = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
+    buf_docs, buf_cons = BytesIO(), BytesIO()
+    docs.to_csv(buf_docs, index=False); buf_docs.seek(0)
+    cons.to_csv(buf_cons, index=False); buf_cons.seek(0)
+
+    # 3) Zip
+    zbuf = BytesIO()
+    with zipfile.ZipFile(zbuf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("logs/audit_log.csv", buf_logs.getvalue())
+        z.writestr("snapshots/documents.csv", buf_docs.getvalue())
+        z.writestr("snapshots/contracts.csv", buf_cons.getvalue())
+        z.writestr("readme.txt", b"Audit Pack: logs + current metadata snapshots. Generated by HR Document Portal.")
+    return zbuf.getvalue()
+
+def page_compliance(con, user):
+    st.subheader("Compliance & Integrity")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Verify hashes now"):
+            out = verify_integrity(con)
+            if out.empty:
+                st.success("All good. No mismatches.")
+            else:
+                st.error(f"{len(out)} issues found")
+                st.dataframe(out, use_container_width=True)
+    with c2:
+        s = st.session_state.get("last_audit_pack_status", "")
+        if s: st.info(s)
+
+    st.markdown("### Token Health")
+    th = token_health(con)
+    if th.empty:
+        st.info("No tokens found.")
+    else:
+        st.dataframe(th, use_container_width=True)
+
+    st.markdown("### Retention Exceptions (eligible to purge)")
+    rx = retention_exceptions(con)
+    if rx.empty:
+        st.success("No retention exceptions.")
+    else:
+        st.dataframe(rx, use_container_width=True)
+
+    st.markdown("### Audit Pack")
+    cc1, cc2 = st.columns(2)
+    with cc1: start = st.date_input("Start", dt.date.today().replace(day=1))
+    with cc2: end = st.date_input("End", dt.date.today())
+    if st.button("Generate Audit Pack"):
+        data = generate_audit_pack(con, pd.Timestamp(start), pd.Timestamp(end))
+        st.download_button("⬇️ Download Audit Pack", data, file_name=f"audit_pack_{start}_{end}.zip")
+        st.session_state["last_audit_pack_status"] = f"Generated for {start} to {end}"
+
 # ===================================================================
 #                         LOGIN UI (NEW) — ONLY HEADER HIDDEN
 # ===================================================================
@@ -975,6 +1222,10 @@ def login_view():
 # ===================================================================
 #                           SERVE MODE HANDLER
 # ===================================================================
+def _get_client_info():
+    # Streamlit doesn't expose headers reliably; store placeholders
+    return {"ip": st.session_state.get("_client_ip",""), "ua": st.session_state.get("_client_ua","")}
+
 def handle_serve_mode():
     if "serve" not in st.query_params:
         return False
@@ -984,24 +1235,33 @@ def handle_serve_mode():
     target_ref = None
     found_table, found_id = None, None
 
-    for rid, fp, ep, ft, et in con.execute(
-        "SELECT id,file_path,email_path,file_token,email_token FROM documents WHERE is_deleted=0"
+    def _not_expired(exp):
+        if not exp: return True  # tolerate if missing
+        try:
+            return dt.datetime.fromisoformat(exp) >= dt.datetime.utcnow()
+        except Exception:
+            return True
+
+    for rid, fp, ep, ft, et, fexp, eexp in con.execute(
+        "SELECT id,file_path,email_path,file_token,email_token,file_token_expires,email_token_expires FROM documents WHERE is_deleted=0"
     ).fetchall():
-        if token == ft: target_ref, found_table, found_id = fp, "documents", rid
-        if token == et: target_ref, found_table, found_id = ep, "documents", rid
+        if token == ft and _not_expired(fexp): target_ref, found_table, found_id = fp, "documents", rid
+        if token == et and _not_expired(eexp): target_ref, found_table, found_id = ep, "documents", rid
 
     if not target_ref:
-        for rid, fp, ep, ft, et in con.execute(
-            "SELECT id,file_path,email_path,file_token,email_token FROM contracts WHERE is_deleted=0"
+        for rid, fp, ep, ft, et, fexp, eexp in con.execute(
+            "SELECT id,file_path,email_path,file_token,email_token,file_token_expires,email_token_expires FROM contracts WHERE is_deleted=0"
         ).fetchall():
-            if token == ft: target_ref, found_table, found_id = fp, "contracts", rid
-            if token == et: target_ref, found_table, found_id = ep, "contracts", rid
+            if token == ft and _not_expired(fexp): target_ref, found_table, found_id = fp, "contracts", rid
+            if token == et and _not_expired(eexp): target_ref, found_table, found_id = ep, "contracts", rid
 
     if not target_ref or not ref_exists(target_ref):
-        st.error("File not found"); st.stop()
+        st.error("File not found or link expired"); st.stop()
 
     actor = (st.session_state.get("user") or {}).get("username", "public")
-    insert_audit(con, actor, "VIEW", found_id, f"{found_table}:{to_display_name(target_ref)}")
+    ci = _get_client_info()
+    insert_audit(con, actor, "VIEW", found_id, f"{found_table}:{to_display_name(target_ref)}",
+                 token=token, table_name=found_table, ip=ci["ip"], user_agent=ci["ua"])
 
     data = read_ref_bytes(target_ref)
     name = to_display_name(target_ref)
@@ -1086,11 +1346,11 @@ def main():
             st.rerun()
 
         # Tab labels per request
-        tabs = ["Documents", "Document Management", "Contract Management"]
+        tabs = ["Dashboard", "Documents", "Document Management", "Contract Management"]
         if role_label == "Viewer":
-            tabs = ["Documents", "Contract Management"]
+            tabs = ["Dashboard", "Documents", "Contract Management"]
         if user["role"] == "admin":
-            tabs += ["Deleted Files", "Audit Logs", "User Management"]
+            tabs += ["Deleted Files", "Audit Logs", "Compliance", "User Management"]
 
         # 🔵 Make tabs blue (active + hover)
         st.markdown("""
@@ -1105,6 +1365,8 @@ def main():
 
         t = st.tabs(tabs)
         with t[0]:
+            page_dashboard(con, user)
+        with t[tabs.index("Documents")]:
             page_documents(con, user)
         if "Document Management" in tabs:
             with t[tabs.index("Document Management")]:
@@ -1118,6 +1380,9 @@ def main():
         if "Audit Logs" in tabs:
             with t[tabs.index("Audit Logs")]:
                 page_audit(con)
+        if "Compliance" in tabs:
+            with t[tabs.index("Compliance")]:
+                page_compliance(con, user)
         if "User Management" in tabs:
             with t[tabs.index("User Management")]:
                 page_manage_users(con, user)
