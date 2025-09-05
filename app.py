@@ -25,17 +25,18 @@ def load_css():
     try:
         base_css = """
 /* KPI cards */
-.kpi-grid {display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0}
-.kpi {border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)}
-.kpi .label{font-size:.85rem;color:#6b7280;margin-bottom:6px}
-.kpi .value{font-size:1.6rem;font-weight:600;color:#111827}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:8px 0 20px}
+.kpi{border:1px solid #e5e7eb;border-radius:14px;padding:18px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.kpi .label{font-size:.85rem;color:#6b7280;margin-bottom:6px;letter-spacing:.2px}
+.kpi .value{font-size:1.8rem;font-weight:700;color:#111827}
+.kpi-accent{box-shadow:inset 0 -3px 0 #2563EB}
 
 /* Section titles */
-.h-section{margin-top:18px;margin-bottom:8px;font-weight:700;font-size:1.25rem}
+.h-section{margin-top:18px;margin-bottom:8px;font-weight:700;font-size:1.15rem}
 
 /* Login styles */
-.login-card{max-width:380px;margin:8vh auto;padding:28px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;box-shadow:0 10px 25px rgba(0,0,0,.08)}
-.login-title{font-weight:700;font-size:1.5rem;text-align:center;margin-bottom:12px}
+.login-card{max-width:420px;margin:10vh auto;padding:28px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;box-shadow:0 10px 25px rgba(0,0,0,.08)}
+.login-title{font-weight:700;font-size:1.6rem;text-align:center;margin-bottom:12px}
 .stButton>button.login-primary{background:#111;color:#fff;border:1px solid #111;border-radius:9999px;padding:.6rem 1rem}
 .stButton>button.login-primary:hover{filter:brightness(1.05)}
 .stButton>button.login-secondary{background:#fff;color:#111;border:1px solid #111;border-radius:9999px;padding:.6rem 1rem}
@@ -511,8 +512,15 @@ def title_case_role(val: str) -> str:
 def rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     return df.rename(columns=mapping)
 
-def kpi_card(label: str, value) -> str:
-    return f'<div class="kpi"><div class="label">{label}</div><div class="value">{value}</div></div>'
+def kpi_card(label: str, value, accent=False) -> str:
+    cls = 'kpi kpi-accent' if accent else 'kpi'
+    return f'<div class="{cls}"><div class="label">{label}</div><div class="value">{value}</div></div>'
+
+def _unpublished_docs_count(docs_df: pd.DataFrame) -> int:
+    if docs_df.empty:
+        return 0
+    ap = docs_df.get('approved_by')
+    return int((ap.isna() | (ap.astype(str).str.strip()=='' )).sum())
 
 def _latest_versions_df(con, doc_type):
     q = """
@@ -765,8 +773,134 @@ def page_documents(con, user):
             delete_version_ui(entity="document", table="documents", versions_df=versions, con=con, user=user)
 
 
+
 def page_dashboard(con, user):
-    st.subheader("Docs Hub")
+    st.subheader("Dashboard")
+
+    # Data
+    docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
+    contracts = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
+    logs = pd.read_sql("SELECT ts,actor,action,doc_id,table_name,details FROM audit_log ORDER BY ts DESC", con)
+
+    # UTC handling
+    now_utc = pd.Timestamp.now(tz="UTC")
+    last30_utc = now_utc - pd.Timedelta(days=30)
+    docs_up = pd.to_datetime(docs.get("upload_date"), utc=True, errors="coerce")
+    cons_up = pd.to_datetime(contracts.get("upload_date"), utc=True, errors="coerce")
+    log_ts = pd.to_datetime(logs.get("ts"), utc=True, errors="coerce")
+
+    # Counts
+    distinct_docs = docs[["doc_type","name"]].drop_duplicates() if not docs.empty else pd.DataFrame(columns=["doc_type","name"])
+    counts = distinct_docs["doc_type"].value_counts().to_dict()
+
+    # KPI row
+    kpi_html = ''.join([
+        kpi_card("Documents (All versions)", int(len(docs)), accent=True),
+        kpi_card("Contracts (All versions)", int(len(contracts))),
+        kpi_card("Unpublished Docs", _unpublished_docs_count(docs)),
+        kpi_card("New last 30 days", int((docs_up >= last30_utc).sum() + (cons_up >= last30_utc).sum())),
+    ])
+    st.markdown(f'<div class="kpi-grid">{kpi_html}</div>', unsafe_allow_html=True)
+
+    # Uploads over time (last 180 days, daily line)
+    cutoff = now_utc - pd.Timedelta(days=180)
+    def _daily(df, label):
+        if df.empty: return pd.DataFrame(columns=["date","type","count"])
+        ups = pd.to_datetime(df["upload_date"], utc=True, errors="coerce")
+        m = ups >= cutoff
+        if not m.any(): return pd.DataFrame(columns=["date","type","count"])
+        d = ups[m].dt.tz_convert(None).dt.date
+        out = pd.DataFrame({"date": d})
+        out = out.groupby("date").size().reset_index(name="count")
+        out["type"] = label
+        return out
+
+    d1 = _daily(docs, "Documents")
+    d2 = _daily(contracts, "Contracts")
+    daily = pd.concat([d1, d2], ignore_index=True)
+
+    st.markdown('<div class="h-section">Uploads over time</div>', unsafe_allow_html=True)
+    if not daily.empty:
+        pivot = daily.pivot_table(index="date", columns="type", values="count", fill_value=0)
+        st.line_chart(pivot)
+    else:
+        st.caption("No uploads in the last 180 days.")
+
+    # Contracts expiring soon
+    contracts["days_to_expiry"] = _days_to_expiry(contracts["end_date"])
+    exp_60 = contracts[(contracts["days_to_expiry"] >= 0) & (contracts["days_to_expiry"] <= 60)]
+    with st.expander("Contracts expiring in the next 60 days", expanded=False):
+        cols = [c for c in ["vendor","name","end_date","days_to_expiry","status","uploaded_by"] if c in exp_60.columns]
+        st.dataframe(exp_60[cols], use_container_width=True)
+
+    # Most viewed (resolve names)
+    with st.expander("Most viewed items (last 30 days)", expanded=False):
+        if logs.empty:
+            st.caption("No views recorded yet.")
+        else:
+            last30 = logs[log_ts >= last30_utc]
+            top = (last30[last30["action"]=="VIEW"]
+                   .groupby(["table_name","doc_id"]).size().reset_index(name="views")
+                   .sort_values("views", ascending=False).head(10))
+            # Map IDs to names
+            name_map_docs = pd.read_sql("SELECT id, name FROM documents", con).set_index("id")["name"].to_dict()
+            name_map_cons = pd.read_sql("SELECT id, name FROM contracts", con).set_index("id")["name"].to_dict()
+            display_rows = []
+            for r in top.itertuples():
+                if r.table_name == "contracts":
+                    display_rows.append({"Type":"Contract","Name": name_map_cons.get(r.doc_id, f"#{r.doc_id}"), "Views": r.views})
+                else:
+                    display_rows.append({"Type":"Document","Name": name_map_docs.get(r.doc_id, f"#{r.doc_id}"), "Views": r.views})
+            st.dataframe(pd.DataFrame(display_rows), use_container_width=True)
+
+    # By document type tabs with quick stats
+    st.markdown('<div class="h-section">By document type</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["SOPs", "BRDs", "Policies"])
+    def _type_block(doc_type):
+        df = docs[docs["doc_type"]==doc_type].copy() if not docs.empty else pd.DataFrame(columns=docs.columns if not docs.empty else [])
+        if df.empty:
+            st.info(f"No {doc_type}s found.")
+            return
+        # Stats
+        approved = df["approved_by"].astype(str).str.strip() != ""
+        drafts = (~approved).sum()
+        active = approved.sum()
+        pending = int((df.get("email_path","").astype(str).str.strip() != "") & (~approved)).sum() if not df.empty else 0
+        st.markdown(f"**Active {doc_type}s:** {int(active)} · **Draft {doc_type}s:** {int(drafts)} · **Pending review:** {int(pending)}")
+        # Monthly uploads chart (12 months)
+        ups = pd.to_datetime(df["upload_date"], utc=True, errors="coerce")
+        mcut = now_utc - pd.Timedelta(days=365)
+        sel = df[ups >= mcut].copy()
+        ups2 = pd.to_datetime(sel["upload_date"], utc=True, errors="coerce")
+        if not sel.empty:
+            months = ups2.dt.tz_convert(None).dt.to_period("M").astype(str)
+            mdf = pd.DataFrame({"month": months})
+            mdf = mdf.groupby("month").size().reset_index(name="count").set_index("month")
+            st.bar_chart(mdf)
+        # Latest table with links
+        latest = _latest_versions_df(con, doc_type)
+        if not latest.empty:
+            show = latest[["name","version","approved_by","upload_date","uploaded_by","remarks","Document Link","Approval Link"]]
+            show = rename_columns(show, {
+                "name":"Name","version":"Version","approved_by":"Approved By","upload_date":"Uploaded On",
+                "uploaded_by":"Uploaded By","remarks":"Remarks"
+            })
+            st.data_editor(
+                show, use_container_width=True, disabled=True,
+                column_config={"Document Link": st.column_config.LinkColumn("Document Link"),
+                               "Approval Link": st.column_config.LinkColumn("Approval Link")}
+            )
+    with tabs[0]:
+        _type_block("SOP")
+    with tabs[1]:
+        _type_block("BRD")
+    with tabs[2]:
+        _type_block("Policy")
+
+    st.markdown("---")
+    with st.expander("Browse all documents and versions", expanded=False):
+        page_documents(con, user)
+
 
     # Load
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
@@ -1116,8 +1250,134 @@ def page_manage_users(con, user):
 
 
 
+
 def page_dashboard(con, user):
-    st.subheader("Overview")
+    st.subheader("Dashboard")
+
+    # Data
+    docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
+    contracts = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
+    logs = pd.read_sql("SELECT ts,actor,action,doc_id,table_name,details FROM audit_log ORDER BY ts DESC", con)
+
+    # UTC handling
+    now_utc = pd.Timestamp.now(tz="UTC")
+    last30_utc = now_utc - pd.Timedelta(days=30)
+    docs_up = pd.to_datetime(docs.get("upload_date"), utc=True, errors="coerce")
+    cons_up = pd.to_datetime(contracts.get("upload_date"), utc=True, errors="coerce")
+    log_ts = pd.to_datetime(logs.get("ts"), utc=True, errors="coerce")
+
+    # Counts
+    distinct_docs = docs[["doc_type","name"]].drop_duplicates() if not docs.empty else pd.DataFrame(columns=["doc_type","name"])
+    counts = distinct_docs["doc_type"].value_counts().to_dict()
+
+    # KPI row
+    kpi_html = ''.join([
+        kpi_card("Documents (All versions)", int(len(docs)), accent=True),
+        kpi_card("Contracts (All versions)", int(len(contracts))),
+        kpi_card("Unpublished Docs", _unpublished_docs_count(docs)),
+        kpi_card("New last 30 days", int((docs_up >= last30_utc).sum() + (cons_up >= last30_utc).sum())),
+    ])
+    st.markdown(f'<div class="kpi-grid">{kpi_html}</div>', unsafe_allow_html=True)
+
+    # Uploads over time (last 180 days, daily line)
+    cutoff = now_utc - pd.Timedelta(days=180)
+    def _daily(df, label):
+        if df.empty: return pd.DataFrame(columns=["date","type","count"])
+        ups = pd.to_datetime(df["upload_date"], utc=True, errors="coerce")
+        m = ups >= cutoff
+        if not m.any(): return pd.DataFrame(columns=["date","type","count"])
+        d = ups[m].dt.tz_convert(None).dt.date
+        out = pd.DataFrame({"date": d})
+        out = out.groupby("date").size().reset_index(name="count")
+        out["type"] = label
+        return out
+
+    d1 = _daily(docs, "Documents")
+    d2 = _daily(contracts, "Contracts")
+    daily = pd.concat([d1, d2], ignore_index=True)
+
+    st.markdown('<div class="h-section">Uploads over time</div>', unsafe_allow_html=True)
+    if not daily.empty:
+        pivot = daily.pivot_table(index="date", columns="type", values="count", fill_value=0)
+        st.line_chart(pivot)
+    else:
+        st.caption("No uploads in the last 180 days.")
+
+    # Contracts expiring soon
+    contracts["days_to_expiry"] = _days_to_expiry(contracts["end_date"])
+    exp_60 = contracts[(contracts["days_to_expiry"] >= 0) & (contracts["days_to_expiry"] <= 60)]
+    with st.expander("Contracts expiring in the next 60 days", expanded=False):
+        cols = [c for c in ["vendor","name","end_date","days_to_expiry","status","uploaded_by"] if c in exp_60.columns]
+        st.dataframe(exp_60[cols], use_container_width=True)
+
+    # Most viewed (resolve names)
+    with st.expander("Most viewed items (last 30 days)", expanded=False):
+        if logs.empty:
+            st.caption("No views recorded yet.")
+        else:
+            last30 = logs[log_ts >= last30_utc]
+            top = (last30[last30["action"]=="VIEW"]
+                   .groupby(["table_name","doc_id"]).size().reset_index(name="views")
+                   .sort_values("views", ascending=False).head(10))
+            # Map IDs to names
+            name_map_docs = pd.read_sql("SELECT id, name FROM documents", con).set_index("id")["name"].to_dict()
+            name_map_cons = pd.read_sql("SELECT id, name FROM contracts", con).set_index("id")["name"].to_dict()
+            display_rows = []
+            for r in top.itertuples():
+                if r.table_name == "contracts":
+                    display_rows.append({"Type":"Contract","Name": name_map_cons.get(r.doc_id, f"#{r.doc_id}"), "Views": r.views})
+                else:
+                    display_rows.append({"Type":"Document","Name": name_map_docs.get(r.doc_id, f"#{r.doc_id}"), "Views": r.views})
+            st.dataframe(pd.DataFrame(display_rows), use_container_width=True)
+
+    # By document type tabs with quick stats
+    st.markdown('<div class="h-section">By document type</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["SOPs", "BRDs", "Policies"])
+    def _type_block(doc_type):
+        df = docs[docs["doc_type"]==doc_type].copy() if not docs.empty else pd.DataFrame(columns=docs.columns if not docs.empty else [])
+        if df.empty:
+            st.info(f"No {doc_type}s found.")
+            return
+        # Stats
+        approved = df["approved_by"].astype(str).str.strip() != ""
+        drafts = (~approved).sum()
+        active = approved.sum()
+        pending = int((df.get("email_path","").astype(str).str.strip() != "") & (~approved)).sum() if not df.empty else 0
+        st.markdown(f"**Active {doc_type}s:** {int(active)} · **Draft {doc_type}s:** {int(drafts)} · **Pending review:** {int(pending)}")
+        # Monthly uploads chart (12 months)
+        ups = pd.to_datetime(df["upload_date"], utc=True, errors="coerce")
+        mcut = now_utc - pd.Timedelta(days=365)
+        sel = df[ups >= mcut].copy()
+        ups2 = pd.to_datetime(sel["upload_date"], utc=True, errors="coerce")
+        if not sel.empty:
+            months = ups2.dt.tz_convert(None).dt.to_period("M").astype(str)
+            mdf = pd.DataFrame({"month": months})
+            mdf = mdf.groupby("month").size().reset_index(name="count").set_index("month")
+            st.bar_chart(mdf)
+        # Latest table with links
+        latest = _latest_versions_df(con, doc_type)
+        if not latest.empty:
+            show = latest[["name","version","approved_by","upload_date","uploaded_by","remarks","Document Link","Approval Link"]]
+            show = rename_columns(show, {
+                "name":"Name","version":"Version","approved_by":"Approved By","upload_date":"Uploaded On",
+                "uploaded_by":"Uploaded By","remarks":"Remarks"
+            })
+            st.data_editor(
+                show, use_container_width=True, disabled=True,
+                column_config={"Document Link": st.column_config.LinkColumn("Document Link"),
+                               "Approval Link": st.column_config.LinkColumn("Approval Link")}
+            )
+    with tabs[0]:
+        _type_block("SOP")
+    with tabs[1]:
+        _type_block("BRD")
+    with tabs[2]:
+        _type_block("Policy")
+
+    st.markdown("---")
+    with st.expander("Browse all documents and versions", expanded=False):
+        page_documents(con, user)
+
 
     # Load data
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
