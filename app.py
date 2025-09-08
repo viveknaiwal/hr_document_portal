@@ -10,142 +10,85 @@ APP_TITLE = "HR Document Portal"
 # ------------------------------ CSS & UI Helpers ------------------------------
 
 def load_css():
-    """Light blue app bg + deep-blue header + green sidebar & buttons. 3D KPI cards. Visible nav text."""
+    """Inline base styles and theme overrides."""
     base_css = """
     :root {
-      --blue:#3333FF;
-      --blue-05:#3333FF0D;
-      --blue-10:#3333FF1A;
-      --blue-15:#3333FF26;
-      --blue-20:#3333FF33;
-      --blue-30:#3333FF4D;
-      --bg-soft:#F4F7FF;       /* app background like screenshot */
-      --white:#FFFFFF;
-      --text:#111827;          /* dark text */
-      --muted:#334155;
-      --green:#16A34A;
-      --green-15:#16A34A26;
-      --green-20:#16A34A33;
+      --primary-blue:#1B60AA;   /* requested blue */
+      --primary-blue-10: #1B60AA1A;
+      --primary-blue-20: #1B60AA33;
+      --primary-blue-30: #1B60AA4D;
+      --primary-green:#19D107;  /* requested green */
     }
 
-    html, body, [data-testid="stAppViewContainer"] { background: var(--bg-soft) !important; }
     .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
-    .subtle { color: var(--muted); opacity: .85; }
+    .subtle { color: #6b7280; }
 
-    /* Header (deep blue) */
+    /* Header: solid blue */
     .custom-header{
-        background: var(--blue);
-        color: var(--white); border-radius:18px; padding:22px 22px; margin:8px 0 18px;
-        box-shadow: 0 22px 34px var(--blue-15);
+        background: var(--primary-blue);
+        color:#fff; border-radius:16px; padding:22px 22px; margin:8px 0 18px;
+        box-shadow: 0 12px 24px rgba(0,0,0,.18);
     }
-    .custom-header h1 { margin:0 0 4px; font-size:1.6rem; }
+    .custom-header h1 { margin:0 0 4px; font-size:1.5rem; }
     .custom-header p { margin:0; opacity:.92 }
 
-    /* Sidebar (green). Do NOT force all children white to avoid hiding selected nav text */
+    /* Pill links in tables */
+    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
+      text-decoration:none;border:1px solid #e5e7eb;padding:.25rem .65rem;border-radius:9999px;
+      background:#fff;color:#111;display:inline-block;
+    }
+
+    /* Status badges */
+    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600}
+    .status-active{background:#dcfce7;color:#065f46;border:1px solid #86efac}
+    .status-expired{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+    .status-review{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}
+
+    /* Sidebar: solid blue */
     section[data-testid="stSidebar"] {
-        background: var(--green) !important;
-        color: var(--white) !important;
+        background: var(--primary-blue) !important;
+        color:#fff !important;
     }
-    section[data-testid="stSidebar"] .block-container { padding-top:1rem; }
-    section[data-testid="stSidebar"] h1, 
-    section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3,
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] div { color: var(--white) !important; }
-    .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:var(--white);
-                 color:var(--green);font-size:.75rem;margin-top:.25rem }
+    section[data-testid="stSidebar"] .block-container { padding-top:1rem; color:#fff; }
+    .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:#fff;
+                 color:var(--primary-blue);font-size:.75rem;margin-top:.25rem }
 
-    /* Navigation radio styles */
+    /* Radio as cards + blue indicators */
     .stRadio > div[role="radiogroup"] > label {
-        background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.35); border-radius:14px;
-        padding:.55rem .85rem; margin:.35rem 0; display:flex; gap:.5rem; align-items:center;
-        box-shadow:0 2px 6px rgba(0,0,0,.12);
-        color: var(--white) !important;
+        background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
+        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,.05); color:#111;
     }
-    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--white) !important; }
-    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--white) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--primary-blue) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--primary-blue) !important; }
 
-    /* Active nav item: white card with dark text so it's readable */
-    .stRadio > div[role="radiogroup"] > label:has(input:checked) {
-        background: var(--white) !important; 
-        color: var(--text) !important;
-        box-shadow: 0 6px 16px rgba(0,0,0,.18), 0 0 0 2px var(--white) inset;
-        border-color: var(--white) !important;
-    }
-    .stRadio > div[role="radiogroup"] > label:has(input:checked) [data-baseweb="radio"] > div:first-child {
-        border-color: var(--green) !important;
-    }
-    .stRadio > div[role="radiogroup"] > label:has(input:checked) [data-baseweb="radio"] > div:first-child > div {
-        background-color: var(--green) !important;
-    }
-
-    /* Inputs / selects */
+    /* Inputs / selects subtle blue border */
     .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
-        background:var(--white) !important; border:1px solid var(--blue-20) !important; color: var(--text) !important;
+        background:#fff !important; border:1px solid var(--primary-blue-20) !important;
     }
     .stSelectbox [data-baseweb="select"] > div {
-        background:var(--white) !important; border:1px solid var(--blue-20) !important; color: var(--text) !important;
+        background:#fff !important; border:1px solid var(--primary-blue-20) !important;
     }
     .stFileUploader div[data-testid="stFileUploaderDropzone"] {
-        background:var(--white) !important; border:1px dashed var(--blue-30) !important;
+        background:#f6faff !important; border:1px dashed var(--primary-blue-30) !important;
     }
 
-    /* GREEN primary buttons everywhere */
-    .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
-        background: var(--green) !important; color:var(--white) !important; border:1px solid var(--green) !important;
-        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 6px 16px var(--green-20) !important;
+    /* Buttons: green */
+    .stButton > button, .stDownloadButton > button {
+        background: var(--primary-green) !important; color:#fff !important; border:1px solid var(--primary-green) !important;
+        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px rgba(0,0,0,.12) !important;
     }
-    .stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] button:hover { filter:brightness(1.05) !important; }
+    .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
 
-    /* Links inside tables (blue pills) */
-    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
-      text-decoration:none;border:1px solid var(--blue-20);padding:.25rem .65rem;border-radius:9999px;
-      background:var(--white);color:var(--blue);display:inline-block;
-    }
-
-    /* Single-style status badge */
-    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600;
-                  border:1px solid var(--blue); color:var(--blue); background:var(--white)}
-
-    /* Alerts in blue/white */
-    .stAlert { background: var(--white) !important; border:1px solid var(--blue) !important; color: var(--blue) !important; }
-    .stAlert [data-testid="stMarkdown"] p, .stAlert p, .stAlert div { color: var(--blue) !important; }
-
-    /* Hide 'Press Enter to submit' */
-    [data-testid="stFormSubmitterMessage"] { display:none !important; }
-
-    /* KPI 3D cards */
-    .kpi-grid{
-      display:grid;
-      grid-template-columns: repeat(4, minmax(0,1fr));
-      gap: 18px;
-      margin: 6px 0 18px 0;
-    }
+    /* KPI Cards (3D style) */
+    .kpi-grid{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:18px; margin: 6px 0 18px; }
     @media (max-width: 1100px){ .kpi-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
     @media (max-width: 700px){ .kpi-grid{ grid-template-columns: 1fr; } }
-
     .kpi-card{
-      background: var(--white);
-      border-radius: 16px;
-      padding: 16px 18px;
-      border: 1px solid #e6e6f0;
-      box-shadow:
-        0 26px 38px rgba(0,0,0,.12),
-        0 12px 18px rgba(0,0,0,.06),
-        inset 0 -4px 0 var(--blue-10);
+      background:#fff; border-radius:16px; padding:16px 18px; border:1px solid #eef0f5;
+      box-shadow: 0 20px 30px rgba(0,0,0,.12), 0 8px 12px rgba(0,0,0,.06), inset 0 -3px 0 var(--primary-blue-10);
     }
-    .kpi-title{ font-size: .92rem; color: var(--muted); margin: 0 0 8px 0; }
-    .kpi-value{ font-weight: 700; font-size: 1.75rem; color: var(--text); margin:0; }
-    .kpi-chip{
-      display:inline-block; font-size:.70rem; padding:.2rem .5rem; border-radius:9999px;
-      border:1px solid var(--blue-20); color:var(--blue); background: var(--white);
-    }
-
-    /* Hide default chrome */
-    header[data-testid="stHeader"] { background: var(--bg-soft); }
-    footer { visibility:hidden; }
-    #MainMenu, .stDeployButton { visibility:hidden; }
+    .kpi-title{ font-size:.92rem; color:#546170; margin:0 0 8px 0; }
+    .kpi-value{ font-weight:700; font-size:1.75rem; color:#0f172a; margin:0; }
     """
     try:
         with open("style.css", "r", encoding="utf-8") as f:
@@ -163,18 +106,452 @@ def create_header(title="HR Document Portal", subtitle="Streamlined document & c
     """, unsafe_allow_html=True)
 
 def create_status_badge(status):
-    return f'<span class="status-badge">{status}</span>'
+    status_classes = {
+        "Active": "status-active",
+        "Expired": "status-expired",
+        "Under review": "status-review"
+    }
+    class_name = status_classes.get(status, "status-review")
+    return f'<span class="status-badge {class_name}">{status}</span>'
 
-
+# ---------- KPI helper (error‑free, compact HTML so Streamlit doesn't treat it as code) ----------
 def kpi_cards(rows):
-    """rows: list of dicts with keys: title, value, chip (optional)"""
+    """rows = list of {title, value}."""
     parts = ['<div class="kpi-grid">']
     for r in rows:
-        chip_html = f'<span class="kpi-chip">{r.get("chip","")}</span>' if r.get("chip") else ""
-        parts.append(f'<div class="kpi-card"><div class="kpi-title">{r["title"]}</div><div class="kpi-value">{r["value"]}</div>{chip_html}</div>')
-    parts.append("</div>")
-    html = "".join(parts)
-    st.markdown(html, unsafe_allow_html=True)
+        parts.append(f'<div class="kpi-card"><div class="kpi-title">{r["title"]}</div><div class="kpi-value">{r["value"]}</div></div>')
+    parts.append('</div>')
+    st.markdown(''.join(parts), unsafe_allow_html=True)
+
+# ------------------------------ Storage ------------------------------
+
+LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
+LOCAL_DB_PATH = Path("storage/hr_docs.db")
+LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# DROPBOX (optional)
+USE_DROPBOX = False
+dbx = None
+DBX_ROOT = "/HR_Documents_Portal"
+try:
+    import dropbox
+    try:
+        if "DROPBOX_REFRESH_TOKEN" in st.secrets:
+            dbx = dropbox.Dropbox(
+                oauth2_refresh_token=st.secrets["DROPBOX_REFRESH_TOKEN"],
+                app_key=st.secrets["DROPBOX_APP_KEY"],
+                app_secret=st.secrets["DROPBOX_APP_SECRET"],
+            )
+            USE_DROPBOX = True
+        elif "DROPBOX_ACCESS_TOKEN" in st.secrets and st.secrets["DROPBOX_ACCESS_TOKEN"].strip():
+            dbx = dropbox.Dropbox(st.secrets["DROPBOX_ACCESS_TOKEN"].strip())
+            USE_DROPBOX = True
+        DBX_ROOT = st.secrets.get("DROPBOX_ROOT", "/HR_Documents_Portal").rstrip("/")
+    except Exception:
+        USE_DROPBOX = False
+        DBX_ROOT = "/HR_Documents_Portal"
+except Exception:
+    USE_DROPBOX = False
+    DBX_ROOT = "/HR_Documents_Portal"
+
+def dbx_path(*parts) -> str:
+    return DBX_ROOT + "/" + "/".join(str(p).strip("/").replace("\\", "/") for p in parts)
+
+def dbx_ensure_folder(path: str):
+    try:
+        dbx.files_get_metadata(path)
+    except Exception:
+        try:
+            dbx.files_create_folder_v2(path)
+        except Exception:
+            pass
+
+def dbx_upload_bytes(path: str, data: bytes):
+    dbx_ensure_folder("/".join(path.split("/")[:-1]))
+    dbx.files_upload(data, path, mode=dropbox.files.WriteMode("overwrite"))
+
+def dbx_download_bytes(path: str) -> bytes | None:
+    try:
+        _, res = dbx.files_download(path)
+        return res.content
+    except Exception:
+        return None
+
+def dbx_exists(path: str) -> bool:
+    try:
+        dbx.files_get_metadata(path)
+        return True
+    except Exception:
+        return False
+
+# GOOGLE DRIVE (optional)
+USE_GDRIVE = False
+gdrive_service = None
+GDRIVE_ROOT_ID = None
+try:
+    if st.secrets.get("GDRIVE_ENABLED", False):
+        from google.oauth2.service_account import Credentials
+        from googleapiclient.discovery import build
+        creds = Credentials.from_service_account_info(
+            st.secrets["GDRIVE_SERVICE_ACCOUNT_JSON"],
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        gdrive_service = build("drive", "v3", credentials=creds)
+        GDRIVE_ROOT_ID = st.secrets["GDRIVE_ROOT_FOLDER_ID"]
+        USE_GDRIVE = True
+except Exception:
+    USE_GDRIVE = False
+
+def gdrive_get_or_create_folder(parent_id: str, name: str) -> str:
+    q = f"'{parent_id}' in parents and name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    res = gdrive_service.files().list(q=q, fields="files(id,name)").execute()
+    files = res.get("files", [])
+    if files:
+        return files[0]["id"]
+    meta = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
+    folder = gdrive_service.files().create(body=meta, fields="id").execute()
+    return folder["id"]
+
+def gdrive_upload_bytes(parts: list[str], filename: str, data: bytes) -> str:
+    parent = GDRIVE_ROOT_ID
+    for p in parts:
+        parent = gdrive_get_or_create_folder(parent, p)
+    from googleapiclient.http import MediaIoBaseUpload  # import inside
+    media = MediaIoBaseUpload(BytesIO(data), mimetype=mimetypes.guess_type(filename)[0] or "application/octet-stream")
+    meta = {"name": filename, "parents": [parent]}
+    f = gdrive_service.files().create(body=meta, media_body=media, fields="id").execute()
+    return f["id"]
+
+def gdrive_download_bytes(file_id: str) -> bytes | None:
+    try:
+        req = gdrive_service.files().get_media(fileId=file_id)
+        buf = BytesIO()
+        from googleapiclient.http import MediaIoBaseDownload
+        downloader = MediaIoBaseDownload(buf, req)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        return buf.getvalue()
+    except Exception:
+        return None
+
+def gdrive_exists(file_id: str) -> bool:
+    try:
+        gdrive_service.files().get(fileId=file_id, fields="id").execute()
+        return True
+    except Exception:
+        return False
+
+# ------------------------------ Helpers ------------------------------
+
+def sha256_bytes(b):
+    h = hashlib.sha256(); h.update(b); return h.hexdigest()
+
+def _hash(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+def init_db():
+    if USE_DROPBOX:
+        dbx_db_path = dbx_path("db", "hr_docs.db")
+        data = dbx_download_bytes(dbx_db_path)
+        if data:
+            LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LOCAL_DB_PATH.write_bytes(data)
+
+    con = sqlite3.connect(LOCAL_DB_PATH, check_same_thread=False)
+    cur = con.cursor()
+    cur.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_type TEXT,
+            name TEXT,
+            created_date TEXT,
+            upload_date TEXT,
+            approved_by TEXT,
+            file_path TEXT,
+            email_path TEXT,
+            version INTEGER,
+            uploaded_by TEXT,
+            hash_sha256 TEXT,
+            is_deleted INTEGER DEFAULT 0,
+            file_token TEXT,
+            email_token TEXT,
+            remarks TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS contracts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            vendor TEXT,
+            owner TEXT,
+            status TEXT,
+            start_date TEXT,
+            end_date TEXT,
+            renewal_notice_days INTEGER,
+            created_date TEXT,
+            upload_date TEXT,
+            uploaded_by TEXT,
+            file_path TEXT,
+            email_path TEXT,
+            version INTEGER,
+            hash_sha256 TEXT,
+            is_deleted INTEGER DEFAULT 0,
+            file_token TEXT,
+            email_token TEXT,
+            remarks TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT,
+            actor TEXT,
+            action TEXT,
+            doc_id INTEGER,
+            details TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            password_sha256 TEXT,
+            role TEXT,
+            created_date TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            token TEXT PRIMARY KEY,
+            email TEXT,
+            expires TEXT
+        );
+        """
+    )
+
+    cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
+    if cur.fetchone()[0] == 0:
+        try:
+            default_admin = st.secrets.get("DEFAULT_ADMIN_EMAIL", "admin@cars24.com").lower()
+            default_pwd = st.secrets.get("DEFAULT_ADMIN_PASSWORD", "admin123")
+        except Exception:
+            default_admin = "admin@cars24.com"; default_pwd = "admin123"
+        cur.execute(
+            "INSERT OR IGNORE INTO users (email,password_sha256,role,created_date) VALUES (?,?,?,?)",
+            (default_admin, _hash(default_pwd), "admin", dt.datetime.utcnow().isoformat()),
+        )
+        con.commit()
+
+    # Safe schema adds
+    for stmt in [
+        "ALTER TABLE documents ADD COLUMN remarks TEXT",
+        "ALTER TABLE contracts ADD COLUMN remarks TEXT",
+        "ALTER TABLE contracts ADD COLUMN renewal_notice_days INTEGER",
+    ]:
+        try:
+            cur.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+
+    con.commit()
+    return con
+
+def backup_db_to_dropbox():
+    if USE_DROPBOX and LOCAL_DB_PATH.exists():
+        dbx_upload_bytes(dbx_path("db", "hr_docs.db"), LOCAL_DB_PATH.read_bytes())
+
+def insert_audit(con, actor, action, doc_id=None, details=""):
+    con.execute(
+        "INSERT INTO audit_log(ts,actor,action,doc_id,details) VALUES (?,?,?,?,?)",
+        (dt.datetime.utcnow().isoformat(), actor, action, doc_id, details),
+    )
+    con.commit()
+    backup_db_to_dropbox()
+
+def authenticate(username, password, con):
+    cur = con.execute("SELECT email,password_sha256,role FROM users WHERE email=?", (username.strip().lower(),))
+    row = cur.fetchone()
+    if row and _hash(password) == row[1]:
+        return {"username": row[0], "role": row[2]}
+    return None
+
+def new_auth_token(con, email, days=30):
+    token = secrets.token_urlsafe(24)
+    exp = (dt.datetime.utcnow() + dt.timedelta(days=days)).isoformat()
+    con.execute("INSERT OR REPLACE INTO auth_tokens (token,email,expires) VALUES (?,?,?)", (token, email, exp))
+    con.commit(); backup_db_to_dropbox()
+    return token
+
+def validate_auth_token(con, token) -> dict | None:
+    cur = con.execute("SELECT email,expires FROM auth_tokens WHERE token=?", (token,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    email, expires = r
+    if dt.datetime.fromisoformat(expires) < dt.datetime.utcnow():
+        con.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
+        con.commit(); backup_db_to_dropbox()
+        return None
+    cur = con.execute("SELECT role FROM users WHERE email=?", (email,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {"username": email, "role": row[0]}
+
+def delete_auth_token(con, token):
+    con.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
+    con.commit(); backup_db_to_dropbox()
+
+def gen_token():
+    return secrets.token_urlsafe(16)
+
+def ensure_tokens(con, row_id, email_exists):
+    cur = con.execute("SELECT file_token,email_token FROM documents WHERE id=?", (row_id,))
+    row = cur.fetchone()
+    if not row:
+        return None, None
+    ft, et = row
+    changed = False
+    if not ft:
+        ft = gen_token(); changed = True
+        con.execute("UPDATE documents SET file_token=? WHERE id=?", (ft, row_id))
+    if email_exists and not et:
+        et = gen_token(); changed = True
+        con.execute("UPDATE documents SET email_token=? WHERE id=?", (et, row_id))
+    if changed:
+        con.commit(); backup_db_to_dropbox()
+    return ft, et
+
+def ensure_tokens_generic(con, table, row_id, email_exists):
+    cur = con.execute(f"SELECT file_token,email_token FROM {table} WHERE id=?", (row_id,))
+    row = cur.fetchone()
+    if not row:
+        return None, None
+    ft, et = row; changed = False
+    if not ft:
+        ft = gen_token(); changed = True
+        con.execute(f"UPDATE {table} SET file_token=? WHERE id=?", (ft, row_id))
+    if email_exists and not et:
+        et = gen_token(); changed = True
+        con.execute(f"UPDATE {table} SET email_token=? WHERE id=?", (et, row_id))
+    if changed:
+        con.commit(); backup_db_to_dropbox()
+    return ft, et
+
+def make_zip(refs: list) -> bytes:
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for ref in refs:
+            if ref and ref_exists(ref):
+                data = read_ref_bytes(ref)
+                if data is not None:
+                    zf.writestr(to_display_name(ref), data)
+    return buf.getvalue()
+
+def is_dbx_path(p: str) -> bool:
+    return p.startswith("dbx:/")
+
+def to_display_name(p: str) -> str:
+    if p.startswith("gdrive:"):
+        parts = p.split(":", 2)
+        return parts[2] if len(parts) > 2 else "file"
+    return Path(p.split(":", 1)[1] if is_dbx_path(p) else p).name
+
+def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: int, filename: str) -> str:
+    safe_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+    if USE_GDRIVE:
+        file_id = gdrive_upload_bytes([doc_type, safe_name, f"v{version}"], filename, data)
+        return f"gdrive:{file_id}:{filename}"
+    if USE_DROPBOX:
+        remote_dir = dbx_path(doc_type, safe_name, f"v{version}")
+        remote_file = remote_dir + "/" + filename
+        dbx_upload_bytes(remote_file, data)
+        return "dbx:" + remote_file
+    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"
+    subdir.mkdir(parents=True, exist_ok=True)
+    local_file = subdir / filename
+    local_file.write_bytes(data)
+    return "local:" + str(local_file)
+
+def read_ref_bytes(ref: str) -> bytes | None:
+    if ref.startswith("gdrive:"):
+        file_id = ref.split(":", 2)[1]
+        return gdrive_download_bytes(file_id)
+    if is_dbx_path(ref):
+        return dbx_download_bytes(ref.split(":", 1)[1])
+    p = Path(ref.split(":", 1)[1])
+    return p.read_bytes() if p.exists() else None
+
+def ref_exists(ref: str) -> bool:
+    if ref.startswith("gdrive:"):
+        file_id = ref.split(":", 2)[1]
+        return gdrive_exists(file_id)
+    if is_dbx_path(ref):
+        return dbx_exists(ref.split(":", 1)[1])
+    return Path(ref.split(":", 1)[1]).exists()
+
+def _days_to_expiry(end_series):
+    end_dt = pd.to_datetime(end_series, errors="coerce")
+    today_ts = pd.Timestamp(dt.date.today())
+    return (end_dt - today_ts).dt.days
+
+def soft_delete_record(con, table: str, row_id: int, actor: str, reason: str = ""):
+    con.execute(f"UPDATE {table} SET is_deleted=1 WHERE id=?", (row_id,))
+    con.commit()
+    action = "DELETE_CONTRACT" if table == "contracts" else "DELETE_DOC"
+    insert_audit(con, actor, action, row_id, details=f"table={table};id={row_id};reason={reason}")
+    backup_db_to_dropbox()
+
+def restore_record(con, table: str, row_id: int, actor: str, reason: str = ""):
+    con.execute(f"UPDATE {table} SET is_deleted=0 WHERE id=?", (row_id,))
+    con.commit()
+    action = "RESTORE_CONTRACT" if table == "contracts" else "RESTORE_DOC"
+    det = f"table={table};id={row_id}"
+    if reason:
+        det += f";reason={reason}"
+    insert_audit(con, actor, action, row_id, details=det)
+    backup_db_to_dropbox()
+
+def last_delete_info(con, table: str, row_id: int):
+    act = "DELETE_CONTRACT" if table == "contracts" else "DELETE_DOC"
+    row = con.execute(
+        "SELECT actor, ts FROM audit_log WHERE action=? AND doc_id=? ORDER BY ts DESC LIMIT 1",
+        (act, row_id)
+    ).fetchone()
+    return row if row else ("", "")
+
+def title_case_role(val: str) -> str:
+    return {"admin": "Admin", "editor": "Editor", "viewer": "Viewer"}.get(str(val).lower(), str(val).title())
+
+def rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
+    return df.rename(columns=mapping)
+
+# ------------------------------ Pages ------------------------------
+
+def ensure_tokens_docs(con, versions_df):
+    df = versions_df.copy()
+    view_doc, view_email = [], []
+    for r in df.itertuples():
+        ft, et = ensure_tokens(con, getattr(r, "id"), bool(getattr(r, "email_path")))
+        view_doc.append(f"/?serve={ft}" if ft else "—")
+        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
+    df["Document Link"] = view_doc
+    df["Approval Link"] = view_email
+    df["is_latest"] = [True if i == 0 else False for i in range(len(df))]
+    return df
+
+def ensure_tokens_contracts(con, versions_df):
+    df = versions_df.copy()
+    view_doc, view_email = [], []
+    for r in df.itertuples():
+        ft, et = ensure_tokens_generic(con, "contracts", getattr(r, "id"), bool(getattr(r, "email_path")))
+        view_doc.append(f"/?serve={ft}" if ft else "—")
+        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
+    df["Document Link"] = view_doc
+    df["Approval Link"] = view_email
+    return df
+
+def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con, user):
+    st.markdown("#### Delete")
     sel_v = st.selectbox(
         "Version to delete",
         versions_df["version"].tolist(),
@@ -257,11 +634,11 @@ def page_upload(con, user):
 def page_documents(con, user):
     create_header("Dashboard", "Overview, search and version drilldowns")
 
-    # --- KPI 3D cards ---
+    # --- KPI cards ---
     docs_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c'])
     contracts_count = int(pd.read_sql("SELECT COUNT(*) as c FROM contracts WHERE is_deleted=0", con).iloc[0]['c'])
     recent_uploads = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE date(upload_date) >= date('now','-30 days')", con).iloc[0]['c'])
-    unpublished = 0  # placeholder if you add a field later
+    unpublished = 0
     sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
     brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
     pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
@@ -323,7 +700,7 @@ def page_documents(con, user):
 
     st.markdown("---")
     st.markdown("### Document Versions")
-    groups = g.drop_duplicates(subset=["doc_type","name","vendor"]) if "vendor" in g.columns else g.drop_duplicates(subset=["doc_type","name"])
+    groups = g.drop_duplicates(subset=["doc_type","name","vendor"])
     labels = [f"{r.doc_type} — {r.name}" for r in groups.itertuples()]
     if not labels:
         st.markdown('</div>', unsafe_allow_html=True)
@@ -338,7 +715,7 @@ def page_documents(con, user):
     if sel_group["doc_type"] == "Contract":
         versions = pd.read_sql(
             "SELECT * FROM contracts WHERE name=? AND vendor=? AND is_deleted=0 ORDER BY version DESC",
-            con, params=(sel_group["name"], sel_group["vendor"]) if "vendor" in sel_group else (sel_group["name"], "")
+            con, params=(sel_group["name"], sel_group["vendor"])
         )
         v_table = ensure_tokens_contracts(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","status",
@@ -347,7 +724,7 @@ def page_documents(con, user):
                                          "status":"Status","start_date":"Start Date","end_date":"End Date","remarks":"Remarks"})
         st.data_editor(
             v_show, use_container_width=True, disabled=True,
-            key=f"docs_contracts_versions_{sel_group['vendor'] if 'vendor' in sel_group else ''}_{sel_group['name']}",
+            key=f"docs_contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
             column_config={"Document Link": st.column_config.LinkColumn("Document Link"),
                            "Approval Link": st.column_config.LinkColumn("Approval Link")}
         )
@@ -462,7 +839,7 @@ def page_contracts(con, user):
     st.dataframe(f_display, use_container_width=True)
 
     st.markdown("### Version History")
-    groups = f.drop_duplicates(subset=["vendor","name"]) if not f.empty else f
+    groups = f.drop_duplicates(subset=["vendor","name"])
     labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
     if labels:
         pick = st.selectbox("Select Contract", labels, key="contracts_group_pick")
