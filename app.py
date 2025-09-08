@@ -1,16 +1,3 @@
-# app.py — HR Document Portal (Cars24 blue/green theme, final)
-# Colors:
-#   Blue  : #1B60AA
-#   Green : #19D107
-#   Danger: #EF4444
-#
-# Notes:
-# - Positive buttons are green; destructive actions are red (auto-applied via JS).
-# - Login button is blue.
-# - Sidebar text is white; radio indicator dot is green; hover/active is blue.
-# - “Press Enter to apply/submit” hints are removed.
-# - KPI cards use 3D cards (no raw HTML shown).
-# - Section headings use a blue bar with white text.
 
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
 from pathlib import Path
@@ -20,176 +7,51 @@ import streamlit as st
 
 APP_TITLE = "HR Document Portal"
 
-# ------------------------------ CSS / JS ------------------------------
+# ------------------------------ CSS & UI Helpers ------------------------------
 
-def load_css_and_js():
-    css = """
-    :root{
-      --brand-blue:#1B60AA;
-      --brand-green:#19D107;
+def load_css():
+    """Inline base styles and theme overrides per spec:
+       - Blue headers/sidebar: #1B60AA
+       - Green primary buttons: #19D107 (except login which is blue)
+       - No red accents except explicit danger areas
+       - KPI cards included
+       - Hide "Press Enter to apply/submit" hints
+    """
+    base_css = """
+    :root {
+      --primary-blue:#1B60AA;
+      --primary-blue-08:#1B60AA14;
+      --primary-blue-16:#1B60AA29;
+      --primary-green:#19D107;
       --danger-red:#EF4444;
-      --sky-50:#F8FBFF;
-      --ring:#CFE2F3;
+      --text-dark:#0f172a;
+      --muted:#6b7280;
     }
 
-    /* Container spacing */
-    .block-container{padding-top:.75rem;padding-bottom:3rem}
+    .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
+    .subtle { color: #ffffff; } /* sidebar subtle text to white */
 
-    /* Hide Streamlit default header + footer footprints on login */
-    header[data-testid="stHeader"] { background: transparent; }
+    /* App background */
+    body { background: #f6f8fb; }
 
-    /* Top banner header */
+    /* Header: blue with white text */
     .custom-header{
-      background: var(--brand-blue);
-      color:#fff;
-      border-radius:16px;
-      padding:22px 22px;
-      margin:8px 0 18px;
-      box-shadow: 0 14px 28px rgba(27,96,170,.25);
+        background: var(--primary-blue);
+        color:#fff; border-radius:16px; padding:22px 22px; margin:8px 0 18px;
+        box-shadow: 0 12px 24px rgba(0,0,0,.18);
     }
-    .custom-header h1{margin:0 0 4px;font-size:1.5rem}
-    .custom-header p{margin:0;opacity:.95}
+    .custom-header h1 { margin:0 0 4px; font-size:1.5rem; color:#fff; }
+    .custom-header p { margin:0; opacity:.95; color:#fff; }
 
-    /* Section bar (blue with white text) */
-    .section-bar{
-      background: var(--brand-blue);
-      color:#fff;
-      font-weight:700;
-      border-radius:12px;
-      padding:10px 14px;
-      margin: 16px 0 8px;
-      box-shadow: 0 10px 24px rgba(27,96,170,.25);
+    /* Section header helper */
+    .section-header {
+        background: var(--primary-blue); color:#fff; padding:10px 14px; border-radius:10px;
+        margin: 12px 0 10px; font-weight:700;
+        box-shadow: 0 8px 16px rgba(0,0,0,.12);
     }
 
-    /* Sidebar: solid blue, white text */
-    section[data-testid="stSidebar"]{
-      background: var(--brand-blue) !important;
-      color:#fff !important;
-    }
-    section[data-testid="stSidebar"] .block-container{
-      color:#fff !important;
-      padding-top:1rem;
-    }
-    section[data-testid="stSidebar"] *{
-      color:#fff !important;
-    }
-
-    /* Role chip under email (visible text; no blank white pill) */
-    .role-pill{
-      display:inline-block;
-      padding:.15rem .55rem;
-      border-radius:9999px;
-      background:#fff;
-      color:var(--brand-blue) !important;
-      font-size:.75rem;
-      margin-top:.35rem
-    }
-
-    /* Sidebar navigate radio: transparent card look, white text, blue/green accents */
-    .stRadio > div[role="radiogroup"] > label{
-      background: transparent !important;
-      border:1px solid rgba(255,255,255,.25) !important;
-      border-radius:14px;
-      padding:.55rem .85rem;
-      margin:.35rem 0;
-      display:flex;gap:.5rem;align-items:center;
-      box-shadow: inset 0 0 0 0 rgba(0,0,0,0);
-      transition: all .18s ease;
-      color:#fff !important;
-    }
-    .stRadio > div[role="radiogroup"] > label:hover{
-      background: rgba(255,255,255,.08) !important;
-      border-color:#fff !important;
-    }
-    /* Radio ring + dot */
-    .stRadio [data-baseweb="radio"] > div:first-child {
-      border-color: var(--brand-blue) !important;
-      box-shadow:0 0 0 3px rgba(255,255,255,.35) inset !important;
-    }
-    .stRadio [data-baseweb="radio"] > div:first-child > div {
-      background: var(--brand-green) !important;  /* green inner dot */
-    }
-
-    /* Inputs light blue surface */
-    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input{
-      background:#F2F7FD !important;
-      border:1px solid #D7E6F7 !important;
-    }
-    .stSelectbox [data-baseweb="select"] > div{
-      background:#F2F7FD !important;
-      border:1px solid #D7E6F7 !important;
-    }
-    .stFileUploader div[data-testid="stFileUploaderDropzone"]{
-      background:#F2F7FD !important;
-      border:1px dashed #D7E6F7 !important;
-    }
-
-    /* Tabs: active/hover blue; text blue for visibility */
-    [data-testid="stTabs"] button{
-      color: var(--brand-blue) !important;
-    }
-    [data-testid="stTabs"] button[aria-selected="true"]{
-      color: var(--brand-blue) !important;
-      border-color: var(--brand-blue) !important;
-    }
-
-    /* Default buttons: GREEN (positive) */
-    .stButton > button, .stDownloadButton > button{
-      background: var(--brand-green) !important;
-      color:#fff !important;
-      border:1px solid var(--brand-green) !important;
-      border-radius:9999px !important;
-      padding:.55rem 1rem !important;
-      box-shadow: 0 10px 20px rgba(25,209,7,.25) !important;
-      transition: transform .08s ease, filter .15s ease;
-    }
-    .stButton > button:hover, .stDownloadButton > button:hover{
-      filter:brightness(1.05) !important;
-      transform: translateY(-1px);
-    }
-
-    /* Variants set by JS */
-    button.primary-blue{
-      background: var(--brand-blue) !important;
-      border-color: var(--brand-blue) !important;
-      box-shadow: 0 10px 22px rgba(27,96,170,.28) !important;
-    }
-    button.danger{
-      background: var(--danger-red) !important;
-      border-color: var(--danger-red) !important;
-      box-shadow: 0 10px 22px rgba(239,68,68,.28) !important;
-    }
-
-    /* KPI cards grid */
-    .kpi-grid{
-      display:grid;
-      grid-template-columns: repeat(4, minmax(0,1fr));
-      gap:16px;
-      margin: 6px 0 18px;
-    }
-    .kpi-card{
-      background: linear-gradient(160deg, #FFFFFF 0%, #F5F9FF 55%, #ECF4FF 100%);
-      border:1px solid #E7EEF8;
-      border-radius:18px;
-      padding:16px 18px;
-      box-shadow:
-        0 12px 24px rgba(0,0,0,.06),
-        inset 0 2px 0 rgba(255,255,255,.8),
-        inset 0 -6px 18px rgba(27,96,170,.08);
-      position:relative;
-    }
-    .kpi-card:after{
-      content:"";
-      position:absolute; inset:-1px;
-      border-radius:18px;
-      box-shadow: inset 0 0 0 1px rgba(27,96,170,.06);
-      pointer-events:none;
-    }
-    .kpi-title{font-size:.9rem;color:#3b4a5a;margin-bottom:6px;font-weight:600}
-    .kpi-value{font-size:1.8rem;color:#0f172a;font-weight:800}
-
-    /* Tables: link pills */
-    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a{
+    /* Tables: pill links */
+    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
       text-decoration:none;border:1px solid #e5e7eb;padding:.25rem .65rem;border-radius:9999px;
       background:#fff;color:#111;display:inline-block;
     }
@@ -200,42 +62,75 @@ def load_css_and_js():
     .status-expired{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
     .status-review{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}
 
-    /* Hide Enter-help hints */
-    .enter-hint, div[title="Press Enter to apply"]{display:none !important}
-    """
-
-    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-
-    # Small DOM helper to:
-    # 1) make destructive buttons red if label starts with "Delete"
-    # 2) make positive ones green
-    # 3) make Login button blue
-    # 4) remove 'Press Enter to apply/submit' helper texts
-    js = """
-    <script>
-    const GOOD = new Set(["upload","upload contract","add user","restore","generate audit pack","download","logout"]);
-    function classifyButtons(){
-      document.querySelectorAll('button').forEach(btn=>{
-        const t = (btn.innerText||"").trim().toLowerCase();
-        btn.classList.remove('danger','primary-blue');
-        if (t.startsWith('delete')) btn.classList.add('danger');
-        else if (t === 'login') btn.classList.add('primary-blue');
-        else if (GOOD.has(t)) { /* keep default green */ }
-      });
+    /* Sidebar: solid blue, all text white */
+    section[data-testid="stSidebar"] {
+        background: var(--primary-blue) !important;
+        color:#fff !important;
     }
-    function hideEnterHints(){
-      const rx = /(press\\s+enter\\s+to\\s+(apply|submit))/i;
-      document.querySelectorAll('small,span,div').forEach(n=>{
-        if (rx.test(n.textContent||"")) n.style.display="none";
-      });
-    }
-    const obs = new MutationObserver(()=>{ classifyButtons(); hideEnterHints(); });
-    obs.observe(document.body, {subtree:true, childList:true});
-    classifyButtons(); hideEnterHints();
-    </script>
-    """
-    st.components.v1.html(js, height=0, scrolling=False)
+    section[data-testid="stSidebar"] .block-container { padding-top:1rem; color:#fff; }
+    section[data-testid="stSidebar"] * { color:#fff !important; }
+    .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:#fff;
+                 color:var(--primary-blue);font-size:.75rem;margin-top:.25rem }
 
+    /* Sidebar radio nav: card-like options, readable text */
+    section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] > label {
+        background: rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.30);
+        border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
+        display:flex; gap:.5rem; align-items:center;
+    }
+    section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] > label:hover {
+        border-color:#fff; box-shadow: inset 0 0 0 1px #fff;
+    }
+    /* Radio circle: green dot, blue ring */
+    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--primary-blue) !important; box-shadow: 0 0 0 3px var(--primary-blue-08) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--primary-green) !important; }
+
+    /* Inputs / selects borders */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
+        background:#fff !important; border:1px solid var(--primary-blue-16) !important;
+    }
+    .stSelectbox [data-baseweb="select"] > div {
+        background:#fff !important; border:1px solid var(--primary-blue-16) !important;
+    }
+    .stFileUploader div[data-testid="stFileUploaderDropzone"] {
+        background:#f6faff !important; border:1px dashed var(--primary-blue-16) !important;
+    }
+
+    /* Buttons: global green */
+    .stButton > button, .stDownloadButton > button {
+        background: var(--primary-green) !important; color:#fff !important; border:1px solid var(--primary-green) !important;
+        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px rgba(0,0,0,.12) !important;
+    }
+    .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
+
+    /* Tabs: selection and hover blue */
+    .stTabs [data-baseweb="tab"] { color: var(--text-dark); }
+    .stTabs [aria-selected="true"] { color: var(--primary-blue) !important; border-color: var(--primary-blue) !important; }
+    .stTabs [data-baseweb="tab"]:hover { color: var(--primary-blue) !important; }
+
+    /* Danger zone (delete buttons only) */
+    .danger-zone .stButton > button { background: var(--danger-red) !important; border-color: var(--danger-red) !important; }
+
+    /* KPI Cards */
+    .kpi-grid{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:18px; margin: 6px 0 18px; }
+    @media (max-width: 1100px){ .kpi-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 700px){ .kpi-grid{ grid-template-columns: 1fr; } }
+    .kpi-card{
+      background:#fff; border-radius:16px; padding:16px 18px; border:1px solid #eef0f5;
+      box-shadow: 0 20px 30px rgba(0,0,0,.10), 0 8px 12px rgba(0,0,0,.06), inset 0 -3px 0 var(--primary-blue-08);
+    }
+    .kpi-title{ font-size:.92rem; color:#546170; margin:0 0 8px 0; }
+    .kpi-value{ font-weight:700; font-size:1.75rem; color:#0f172a; margin:0; }
+
+    /* Hide "Press enter to apply/submit" helper lines */
+    [data-testid="stWidgetInstructions"], [data-testid="InputInstructions"] { display:none !important; }
+    """
+    try:
+        with open("style.css", "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except Exception:
+        pass
+    st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
 
 def create_header(title="HR Document Portal", subtitle="Streamlined document & contract management"):
     st.markdown(f"""
@@ -245,8 +140,8 @@ def create_header(title="HR Document Portal", subtitle="Streamlined document & c
     </div>
     """, unsafe_allow_html=True)
 
-def section_bar(text: str):
-    st.markdown(f'<div class="section-bar">{text}</div>', unsafe_allow_html=True)
+def section_header(title: str):
+    st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
 
 def create_status_badge(status):
     status_classes = {
@@ -257,6 +152,15 @@ def create_status_badge(status):
     class_name = status_classes.get(status, "status-review")
     return f'<span class="status-badge {class_name}">{status}</span>'
 
+# ---------- KPI helper ----------
+def kpi_cards(rows):
+    """rows = list of {title, value}."""
+    parts = ['<div class="kpi-grid">']
+    for r in rows:
+        parts.append(f'<div class="kpi-card"><div class="kpi-title">{r["title"]}</div><div class="kpi-value">{r["value"]}</div></div>')
+    parts.append('</div>')
+    st.markdown(''.join(parts), unsafe_allow_html=True)
+
 # ------------------------------ Storage ------------------------------
 
 LOCAL_STORAGE_DIR = Path("storage/HR_Documents_Portal")
@@ -264,7 +168,7 @@ LOCAL_DB_PATH = Path("storage/hr_docs.db")
 LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# Optional Dropbox
+# DROPBOX (optional)
 USE_DROPBOX = False
 dbx = None
 DBX_ROOT = "/HR_Documents_Portal"
@@ -319,7 +223,7 @@ def dbx_exists(path: str) -> bool:
     except Exception:
         return False
 
-# Optional Google Drive
+# GOOGLE DRIVE (optional)
 USE_GDRIVE = False
 gdrive_service = None
 GDRIVE_ROOT_ID = None
@@ -351,7 +255,7 @@ def gdrive_upload_bytes(parts: list[str], filename: str, data: bytes) -> str:
     parent = GDRIVE_ROOT_ID
     for p in parts:
         parent = gdrive_get_or_create_folder(parent, p)
-    from googleapiclient.http import MediaIoBaseUpload
+    from googleapiclient.http import MediaIoBaseUpload  # import inside
     media = MediaIoBaseUpload(BytesIO(data), mimetype=mimetypes.guess_type(filename)[0] or "application/octet-stream")
     meta = {"name": filename, "parents": [parent]}
     f = gdrive_service.files().create(body=meta, media_body=media, fields="id").execute()
@@ -379,8 +283,11 @@ def gdrive_exists(file_id: str) -> bool:
 
 # ------------------------------ Helpers ------------------------------
 
-def sha256_bytes(b): h = hashlib.sha256(); h.update(b); return h.hexdigest()
-def _hash(pw): return hashlib.sha256(pw.encode()).hexdigest()
+def sha256_bytes(b):
+    h = hashlib.sha256(); h.update(b); return h.hexdigest()
+
+def _hash(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
 
 def init_db():
     if USE_DROPBOX:
@@ -478,8 +385,10 @@ def init_db():
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN renewal_notice_days INTEGER",
     ]:
-        try: cur.execute(stmt)
-        except sqlite3.OperationalError: pass
+        try:
+            cur.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
 
     con.commit()
     return con
@@ -513,7 +422,8 @@ def new_auth_token(con, email, days=30):
 def validate_auth_token(con, token) -> dict | None:
     cur = con.execute("SELECT email,expires FROM auth_tokens WHERE token=?", (token,))
     r = cur.fetchone()
-    if not r: return None
+    if not r:
+        return None
     email, expires = r
     if dt.datetime.fromisoformat(expires) < dt.datetime.utcnow():
         con.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
@@ -521,41 +431,48 @@ def validate_auth_token(con, token) -> dict | None:
         return None
     cur = con.execute("SELECT role FROM users WHERE email=?", (email,))
     row = cur.fetchone()
-    if not row: return None
+    if not row:
+        return None
     return {"username": email, "role": row[0]}
 
 def delete_auth_token(con, token):
     con.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
     con.commit(); backup_db_to_dropbox()
 
-def gen_token(): return secrets.token_urlsafe(16)
+def gen_token():
+    return secrets.token_urlsafe(16)
 
 def ensure_tokens(con, row_id, email_exists):
     cur = con.execute("SELECT file_token,email_token FROM documents WHERE id=?", (row_id,))
     row = cur.fetchone()
-    if not row: return None, None
-    ft, et = row; changed=False
+    if not row:
+        return None, None
+    ft, et = row
+    changed = False
     if not ft:
-        ft = gen_token(); changed=True
+        ft = gen_token(); changed = True
         con.execute("UPDATE documents SET file_token=? WHERE id=?", (ft, row_id))
     if email_exists and not et:
-        et = gen_token(); changed=True
+        et = gen_token(); changed = True
         con.execute("UPDATE documents SET email_token=? WHERE id=?", (et, row_id))
-    if changed: con.commit(); backup_db_to_dropbox()
+    if changed:
+        con.commit(); backup_db_to_dropbox()
     return ft, et
 
 def ensure_tokens_generic(con, table, row_id, email_exists):
     cur = con.execute(f"SELECT file_token,email_token FROM {table} WHERE id=?", (row_id,))
     row = cur.fetchone()
-    if not row: return None, None
-    ft, et = row; changed=False
+    if not row:
+        return None, None
+    ft, et = row; changed = False
     if not ft:
-        ft = gen_token(); changed=True
+        ft = gen_token(); changed = True
         con.execute(f"UPDATE {table} SET file_token=? WHERE id=?", (ft, row_id))
     if email_exists and not et:
-        et = gen_token(); changed=True
+        et = gen_token(); changed = True
         con.execute(f"UPDATE {table} SET email_token=? WHERE id=?", (et, row_id))
-    if changed: con.commit(); backup_db_to_dropbox()
+    if changed:
+        con.commit(); backup_db_to_dropbox()
     return ft, et
 
 def make_zip(refs: list) -> bytes:
@@ -568,7 +485,8 @@ def make_zip(refs: list) -> bytes:
                     zf.writestr(to_display_name(ref), data)
     return buf.getvalue()
 
-def is_dbx_path(p: str) -> bool: return p.startswith("dbx:/")
+def is_dbx_path(p: str) -> bool:
+    return p.startswith("dbx:/")
 
 def to_display_name(p: str) -> str:
     if p.startswith("gdrive:"):
@@ -626,7 +544,8 @@ def restore_record(con, table: str, row_id: int, actor: str, reason: str = ""):
     con.commit()
     action = "RESTORE_CONTRACT" if table == "contracts" else "RESTORE_DOC"
     det = f"table={table};id={row_id}"
-    if reason: det += f";reason={reason}"
+    if reason:
+        det += f";reason={reason}"
     insert_audit(con, actor, action, row_id, details=det)
     backup_db_to_dropbox()
 
@@ -646,33 +565,31 @@ def rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
 
 # ------------------------------ Pages ------------------------------
 
-def render_kpis(con):
-    docs_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c'])
-    contracts_count = int(pd.read_sql("SELECT COUNT(*) as c FROM contracts WHERE is_deleted=0", con).iloc[0]['c'])
-    recent_uploads = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE date(upload_date) >= date('now','-30 days')", con).iloc[0]['c'])
-    unpublished = 0  # placeholder
+def ensure_tokens_docs(con, versions_df):
+    df = versions_df.copy()
+    view_doc, view_email = [], []
+    for r in df.itertuples():
+        ft, et = ensure_tokens(con, getattr(r, "id"), bool(getattr(r, "email_path")))
+        view_doc.append(f"/?serve={ft}" if ft else "—")
+        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
+    df["Document Link"] = view_doc
+    df["Approval Link"] = view_email
+    df["is_latest"] = [True if i == 0 else False for i in range(len(df))]
+    return df
 
-    sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
-    brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
-    pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
-
-    kpi_html = f"""
-    <div class="kpi-grid">
-      <div class="kpi-card"><div class="kpi-title">Total Documents</div><div class="kpi-value">{docs_count}</div></div>
-      <div class="kpi-card"><div class="kpi-title">Active Contracts</div><div class="kpi-value">{contracts_count}</div></div>
-      <div class="kpi-card"><div class="kpi-title">New last 30 days</div><div class="kpi-value">{recent_uploads}</div></div>
-      <div class="kpi-card"><div class="kpi-title">Unpublished Docs</div><div class="kpi-value">{unpublished}</div></div>
-    </div>
-    <div class="kpi-grid" style="grid-template-columns: repeat(3, minmax(0,1fr));">
-      <div class="kpi-card"><div class="kpi-title">SOPs</div><div class="kpi-value">{sop_count}</div></div>
-      <div class="kpi-card"><div class="kpi-title">BRDs</div><div class="kpi-value">{brd_count}</div></div>
-      <div class="kpi-card"><div class="kpi-title">Policies</div><div class="kpi-value">{pol_count}</div></div>
-    </div>
-    """
-    st.markdown(kpi_html, unsafe_allow_html=True)
+def ensure_tokens_contracts(con, versions_df):
+    df = versions_df.copy()
+    view_doc, view_email = [], []
+    for r in df.itertuples():
+        ft, et = ensure_tokens_generic(con, "contracts", getattr(r, "id"), bool(getattr(r, "email_path")))
+        view_doc.append(f"/?serve={ft}" if ft else "—")
+        view_email.append(f"/?serve={et}" if et and getattr(r, "email_path") else "—")
+    df["Document Link"] = view_doc
+    df["Approval Link"] = view_email
+    return df
 
 def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con, user):
-    section_bar("Delete")
+    section_header("Delete")
     sel_v = st.selectbox(
         "Version to delete",
         versions_df["version"].tolist(),
@@ -681,30 +598,21 @@ def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con
     reason = st.text_input(
         "Reason (required)",
         key=f"del_{entity}_reason",
-        help=""
+        help="Add a short justification; it will be recorded in the Audit Logs."
     )
-
-    # Confirmation modal before destructive action
-    open_key = f"open_confirm_{entity}"
-    if st.button("Delete Version", key=f"btn_del_{entity}"):
-        st.session_state[open_key] = True
-
-    if st.session_state.get(open_key, False):
-        with st.modal("Confirm delete"):
-            st.error(f"You're deleting {entity} version {sel_v}. This moves it to Deleted Files.")
-            st.write("Reason:", reason if reason.strip() else "_(required)_")
-            c1, c2 = st.columns(2)
-            if c1.button("Confirm Delete", key=f"confirm_{entity}"):
-                if not reason.strip():
-                    st.warning("Please enter a reason before confirming.")
-                else:
-                    row_id = int(versions_df.loc[versions_df["version"] == sel_v, "id"].iloc[0])
-                    soft_delete_record(con, table, row_id, user["username"], reason.strip())
-                    st.session_state[open_key] = False
-                    st.success(f"{entity.capitalize()} version {sel_v} moved to Deleted Files")
-                    st.rerun()
-            if c2.button("Cancel", key=f"cancel_{entity}"):
-                st.session_state[open_key] = False
+    confirm = st.checkbox("I understand this action is permanent", key=f"del_{entity}_confirm")
+    st.markdown('<div class="danger-zone">', unsafe_allow_html=True)
+    try_delete = st.button("Delete Version", key=f"btn_del_{entity}")
+    st.markdown('</div>', unsafe_allow_html=True)
+    if try_delete:
+        if not confirm:
+            st.error("Please confirm the deletion checkbox."); return
+        if not reason.strip():
+            st.error("Please enter a reason."); return
+        row_id = int(versions_df.loc[versions_df["version"] == sel_v, "id"].iloc[0])
+        soft_delete_record(con, table, row_id, user["username"], reason.strip())
+        st.success(f"{entity.capitalize()} version {sel_v} moved to Deleted Files")
+        st.rerun()
 
 def page_upload(con, user):
     create_header("Upload documents", "Add SOPs, BRDs, Policies with versioning and audit logs")
@@ -754,7 +662,7 @@ def page_upload(con, user):
         con.execute(
             """INSERT INTO documents
                (doc_type,name,created_date,upload_date,approved_by,file_path,email_path,version,uploaded_by,hash_sha256,is_deleted,file_token,email_token,remarks)
-               VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""" ,
             (doc_type, name, str(created_date), dt.datetime.utcnow().isoformat(),
              approved_by, file_ref, email_ref, version, user["username"], sha256_bytes(data), ft, et, remarks.strip())
         )
@@ -770,12 +678,28 @@ def page_upload(con, user):
 def page_documents(con, user):
     create_header("Dashboard", "Overview, search and version drilldowns")
 
-    # KPI cards (3D look)
-    render_kpis(con)
+    # --- KPI cards ---
+    docs_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c'])
+    contracts_count = int(pd.read_sql("SELECT COUNT(*) as c FROM contracts WHERE is_deleted=0", con).iloc[0]['c'])
+    recent_uploads = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE date(upload_date) >= date('now','-30 days')", con).iloc[0]['c'])
+    unpublished = 0
+    sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
+    brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
+    pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
+
+    kpi_cards([
+        {"title":"Total Documents", "value": docs_count},
+        {"title":"Active Contracts", "value": contracts_count},
+        {"title":"New last 30 days", "value": recent_uploads},
+        {"title":"Unpublished Docs", "value": unpublished},
+        {"title":"SOPs", "value": sop_count},
+        {"title":"BRDs", "value": brd_count},
+        {"title":"Policies", "value": pol_count},
+    ])
 
     st.markdown('<div class="custom-card">', unsafe_allow_html=True)
 
-    # Data table & filters
+    # --- Data table & filters ---
     docs = pd.read_sql("SELECT * FROM documents WHERE is_deleted=0", con)
     c = pd.read_sql("""SELECT id, 'Contract' AS doc_type, name,
                               start_date AS created_date, upload_date,
@@ -819,7 +743,7 @@ def page_documents(con, user):
     st.dataframe(g_display, use_container_width=True)
 
     st.markdown("---")
-    section_bar("Document Versions")
+    section_header("Document Versions")
     groups = g.drop_duplicates(subset=["doc_type","name","vendor"])
     labels = [f"{r.doc_type} — {r.name}" for r in groups.itertuples()]
     if not labels:
@@ -925,6 +849,7 @@ def page_contracts(con, user):
             st.success(f"Contract uploaded as version {version}")
 
     st.markdown("---")
+    section_header("Version History")
     df = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
     if df.empty:
         st.info("No contracts yet."); st.markdown('</div>', unsafe_allow_html=True); return
@@ -951,7 +876,6 @@ def page_contracts(con, user):
     latest_flags = f.groupby(["vendor","name"])["version"].transform("max")
     f["is_latest"] = f["version"] == latest_flags
 
-    section_bar("Version History")
     f_display = rename_columns(
         f[["vendor","name","status","start_date","end_date","days_to_expiry","version","is_latest","uploaded_by","remarks"]],
         {"vendor":"Vendor","name":"Name","status":"Status","start_date":"Start Date","end_date":"End Date",
@@ -959,6 +883,7 @@ def page_contracts(con, user):
     )
     st.dataframe(f_display, use_container_width=True)
 
+    st.markdown("### Version History")
     groups = f.drop_duplicates(subset=["vendor","name"])
     labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
     if labels:
@@ -1032,6 +957,7 @@ def page_deleted(con, user):
     st.markdown('</div>', unsafe_allow_html=True)
 
 def generate_audit_pack(con, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> bytes:
+    """Return a zip with logs (CSV) and current metadata snapshots, for auditors."""
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         df_logs = pd.read_sql("SELECT * FROM audit_log", con)
@@ -1075,7 +1001,7 @@ def page_audit(con, user=None):
         st.dataframe(f, use_container_width=True)
 
     st.markdown("---")
-    section_bar("Audit Pack (for external auditors)")
+    section_header("Audit Pack (for external auditors)")
     c1, c2 = st.columns(2)
     with c1: start = st.date_input("Start", dt.date.today().replace(day=1), key="audit_pack_start")
     with c2: end = st.date_input("End", dt.date.today(), key="audit_pack_end")
@@ -1105,7 +1031,7 @@ def page_manage_users(con, user):
             db_role_val = role.lower()
             try:
                 con.execute(
-                    "INSERT INTO users (email,password_sha256,role,created_date) VALUES (?,?,?,?)",
+                    """INSERT INTO users (email,password_sha256,role,created_date) VALUES (?,?,?,?)""",
                     (email.strip().lower(), _hash(pwd), db_role_val, dt.datetime.utcnow().isoformat()),
                 )
                 con.commit()
@@ -1123,39 +1049,40 @@ def page_manage_users(con, user):
 
     if not df.empty:
         del_id = st.selectbox("Delete User ID", df["ID"], key="u_del_id")
-
-        # Confirmation modal for delete user
-        if st.button("Delete User", key="u_del_btn", type="primary"):
-            st.session_state["open_confirm_user"] = True
-
-        if st.session_state.get("open_confirm_user", False):
-            with st.modal("Confirm delete"):
-                target_email = df[df["ID"] == del_id]["Email"].iloc[0]
-                st.error(f"Delete user '{target_email}'?")
-                c1, c2 = st.columns(2)
-                if c1.button("Confirm Delete", key="confirm_user_del"):
-                    if target_email == user["username"]:
-                        st.error("You cannot delete yourself.")
-                    else:
-                        con.execute("DELETE FROM users WHERE id=?", (int(del_id),))
-                        con.commit()
-                        insert_audit(con, user["username"], "DELETE_USER", details=f"email={target_email}")
-                        backup_db_to_dropbox()
-                        st.session_state["open_confirm_user"] = False
-                        st.success("User deleted"); st.rerun()
-                if c2.button("Cancel", key="cancel_user_del"):
-                    st.session_state["open_confirm_user"] = False
+        confirm_email = st.text_input("Type the email to confirm deletion", key="confirm_email_delete")
+        agree = st.checkbox("I confirm I want to delete this user", key="confirm_user_delete")
+        st.markdown('<div class="danger-zone">', unsafe_allow_html=True)
+        do_del = st.button("Delete User", key="u_del_btn", type="primary")
+        st.markdown('</div>', unsafe_allow_html=True)
+        if do_del:
+            target_email = df[df["ID"] == del_id]["Email"].iloc[0]
+            if target_email == user["username"]:
+                st.error("You cannot delete yourself.")
+            elif not agree or confirm_email.strip().lower() != target_email.strip().lower():
+                st.error("Please tick the confirmation and type the user's email exactly.")
+            else:
+                con.execute("DELETE FROM users WHERE id=?", (int(del_id),))
+                con.commit()
+                insert_audit(con, user["username"], "DELETE_USER", details=f"email={target_email}")
+                backup_db_to_dropbox()
+                st.success("User deleted"); st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ------------------------------ Login ------------------------------
+# ------------------------------ Login (classic minimal) ------------------------------
 
 def style_login():
-    # Make the login title blue
-    st.markdown("""
+    st.markdown(f"""
     <style>
-      #MainMenu, .stDeployButton, footer { visibility:hidden; }
-      .login-title h1, .login-title h1 * { color: var(--brand-blue) !important; }
+      header[data-testid="stHeader"] {{ display:none !important; }}
+      #MainMenu, .stDeployButton, footer {{ visibility:hidden; }}
+      /* Login: blue primary button, blue checkbox, blue title */
+      .stButton > button {{ background: var(--primary-blue) !important; border-color: var(--primary-blue) !important; }}
+      .stCheckbox [data-baseweb="checkbox"] > div {{ border-color: var(--primary-blue) !important; }}
+      .stCheckbox [data-baseweb="checkbox"] svg {{ color: var(--primary-blue) !important; }}
+      h1 {{ color: var(--primary-blue) !important; }}
+      /* Hide press enter hints here too */
+      [data-testid="stWidgetInstructions"], [data-testid="InputInstructions"] {{ display:none !important; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -1164,7 +1091,7 @@ def login_view():
     col_l, col_c, col_r = st.columns([1, 1, 1])
     with col_c:
         with st.form("login_form", clear_on_submit=False):
-            st.markdown(f'<div class="login-title"><h1>{APP_TITLE}</h1></div>', unsafe_allow_html=True)
+            st.title(APP_TITLE)
             u = st.text_input("Email", key="login_email")
             p = st.text_input("Password", type="password", key="login_pwd")
             keep = st.checkbox("Keep me signed in on this device", value=True, key="login_keep")
@@ -1236,7 +1163,7 @@ def handle_serve_mode():
 
 def main():
     st.set_page_config(APP_TITLE, layout="wide")
-    load_css_and_js()
+    load_css()
 
     # Serve-mode
     if handle_serve_mode():
@@ -1270,10 +1197,9 @@ def main():
     else:
         with st.sidebar:
             st.markdown("### HR Document Portal")
-            st.markdown(f'<div>{user["username"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="subtle">{user["username"]}</div>', unsafe_allow_html=True)
             st.markdown(f'<span class="role-pill">{user["role"].title()}</span>', unsafe_allow_html=True)
             st.write("")
-            st.markdown("**Navigate**")
             pages = ["📊 Dashboard"]
             if user["role"] in {"admin","editor"}:
                 pages += ["📤 Document Management","📄 Contract Management"]
@@ -1281,7 +1207,7 @@ def main():
                 pages += ["📄 Contract Management"]
             if user["role"] == "admin":
                 pages += ["🗑️ Deleted Files","📊 Audit Logs","👥 User Management"]
-            choice = st.radio("Navigate", pages, index=0, key="nav_radio", label_visibility="collapsed")
+            choice = st.radio("Navigate", pages, index=0, key="nav_radio")
             st.write("")
             if st.button("Logout", key="logout_btn", type="primary"):
                 tok = st.query_params.get("auth", None)
