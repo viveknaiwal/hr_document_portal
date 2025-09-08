@@ -10,38 +10,49 @@ APP_TITLE = "HR Document Portal"
 # ------------------------------ CSS & UI Helpers ------------------------------
 
 def load_css():
-    """Blue content + green nav/buttons. Adds 3D KPI cards. Hides form hint."""
+    """Light blue app bg + deep-blue header + green sidebar & buttons. 3D KPI cards. Visible nav text."""
     base_css = """
     :root {
       --blue:#3333FF;
+      --blue-05:#3333FF0D;
       --blue-10:#3333FF1A;
       --blue-15:#3333FF26;
       --blue-20:#3333FF33;
       --blue-30:#3333FF4D;
+      --bg-soft:#F4F7FF;       /* app background like screenshot */
       --white:#FFFFFF;
+      --text:#111827;          /* dark text */
+      --muted:#334155;
       --green:#16A34A;
       --green-15:#16A34A26;
       --green-20:#16A34A33;
     }
-    html, body, [data-testid="stAppViewContainer"] { background: var(--white) !important; }
-    .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
-    .subtle { color: var(--blue); opacity: .65; }
 
-    /* Header (blue) */
+    html, body, [data-testid="stAppViewContainer"] { background: var(--bg-soft) !important; }
+    .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
+    .subtle { color: var(--muted); opacity: .85; }
+
+    /* Header (deep blue) */
     .custom-header{
         background: var(--blue);
         color: var(--white); border-radius:18px; padding:22px 22px; margin:8px 0 18px;
-        box-shadow: 0 18px 28px var(--blue-15);
+        box-shadow: 0 22px 34px var(--blue-15);
     }
     .custom-header h1 { margin:0 0 4px; font-size:1.6rem; }
     .custom-header p { margin:0; opacity:.92 }
 
-    /* Sidebar (green) */
+    /* Sidebar (green). Do NOT force all children white to avoid hiding selected nav text */
     section[data-testid="stSidebar"] {
-        background: var(--green) !important; color: var(--white) !important;
+        background: var(--green) !important;
+        color: var(--white) !important;
     }
     section[data-testid="stSidebar"] .block-container { padding-top:1rem; }
-    section[data-testid="stSidebar"] * { color: var(--white) !important; }
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div { color: var(--white) !important; }
     .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:var(--white);
                  color:var(--green);font-size:.75rem;margin-top:.25rem }
 
@@ -50,14 +61,17 @@ def load_css():
         background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.35); border-radius:14px;
         padding:.55rem .85rem; margin:.35rem 0; display:flex; gap:.5rem; align-items:center;
         box-shadow:0 2px 6px rgba(0,0,0,.12);
+        color: var(--white) !important;
     }
     .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--white) !important; }
     .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--white) !important; }
 
-    /* Active nav item */
+    /* Active nav item: white card with dark text so it's readable */
     .stRadio > div[role="radiogroup"] > label:has(input:checked) {
-        background: var(--white) !important; color:#000 !important;
-        box-shadow: 0 6px 14px rgba(0,0,0,.18), 0 0 0 2px var(--white) inset;
+        background: var(--white) !important; 
+        color: var(--text) !important;
+        box-shadow: 0 6px 16px rgba(0,0,0,.18), 0 0 0 2px var(--white) inset;
+        border-color: var(--white) !important;
     }
     .stRadio > div[role="radiogroup"] > label:has(input:checked) [data-baseweb="radio"] > div:first-child {
         border-color: var(--green) !important;
@@ -68,23 +82,23 @@ def load_css():
 
     /* Inputs / selects */
     .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
-        background:var(--white) !important; border:1px solid var(--blue-20) !important;
+        background:var(--white) !important; border:1px solid var(--blue-20) !important; color: var(--text) !important;
     }
     .stSelectbox [data-baseweb="select"] > div {
-        background:var(--white) !important; border:1px solid var(--blue-20) !important;
+        background:var(--white) !important; border:1px solid var(--blue-20) !important; color: var(--text) !important;
     }
     .stFileUploader div[data-testid="stFileUploaderDropzone"] {
         background:var(--white) !important; border:1px dashed var(--blue-30) !important;
     }
 
-    /* GREEN primary buttons everywhere (kills red) */
+    /* GREEN primary buttons everywhere */
     .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
         background: var(--green) !important; color:var(--white) !important; border:1px solid var(--green) !important;
         border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 6px 16px var(--green-20) !important;
     }
     .stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] button:hover { filter:brightness(1.05) !important; }
 
-    /* Dataframe links as blue pills */
+    /* Links inside tables (blue pills) */
     [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
       text-decoration:none;border:1px solid var(--blue-20);padding:.25rem .65rem;border-radius:9999px;
       background:var(--white);color:var(--blue);display:inline-block;
@@ -117,19 +131,19 @@ def load_css():
       padding: 16px 18px;
       border: 1px solid #e6e6f0;
       box-shadow:
-        0 18px 30px rgba(0,0,0,.10),
-        0 6px 14px rgba(0,0,0,.06),
+        0 26px 38px rgba(0,0,0,.12),
+        0 12px 18px rgba(0,0,0,.06),
         inset 0 -4px 0 var(--blue-10);
     }
-    .kpi-title{ font-size: .92rem; color:#2b2b2b; margin: 0 0 8px 0; }
-    .kpi-value{ font-weight: 700; font-size: 1.75rem; color:#1f2937; margin:0; }
+    .kpi-title{ font-size: .92rem; color: var(--muted); margin: 0 0 8px 0; }
+    .kpi-value{ font-weight: 700; font-size: 1.75rem; color: var(--text); margin:0; }
     .kpi-chip{
       display:inline-block; font-size:.70rem; padding:.2rem .5rem; border-radius:9999px;
       border:1px solid var(--blue-20); color:var(--blue); background: var(--white);
     }
 
     /* Hide default chrome */
-    header[data-testid="stHeader"] { background: var(--white); }
+    header[data-testid="stHeader"] { background: var(--bg-soft); }
     footer { visibility:hidden; }
     #MainMenu, .stDeployButton { visibility:hidden; }
     """
@@ -161,8 +175,7 @@ def kpi_cards(rows):
           <div class="kpi-title">{r["title"]}</div>
           <div class="kpi-value">{r["value"]}</div>
           {chip}
-        </div>
-        ''')
+        </div>''')
     html.append("</div>")
     st.markdown("\n".join(html), unsafe_allow_html=True)
 
