@@ -10,63 +10,63 @@ APP_TITLE = "HR Document Portal"
 # ------------------------------ CSS & UI Helpers ------------------------------
 
 def load_css():
-    """Blue & White ONLY theme. No other colors used in custom styles."""
+    """Blue content + green nav/buttons. Adds 3D KPI cards. Hides form hint."""
     base_css = """
     :root {
-      --blue:#3333FF; /* electric blue */
-      --blue-10:#3333FF1A; /* 10% alpha */
+      --blue:#3333FF;
+      --blue-10:#3333FF1A;
       --blue-15:#3333FF26;
       --blue-20:#3333FF33;
       --blue-30:#3333FF4D;
-      --blue-60:#3333FF99;
       --white:#FFFFFF;
+      --green:#16A34A;
+      --green-15:#16A34A26;
+      --green-20:#16A34A33;
     }
-    html, body, [data-testid="stAppViewContainer"] {
-      background: var(--white) !important;
-    }
+    html, body, [data-testid="stAppViewContainer"] { background: var(--white) !important; }
     .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
-
-    /* Neutral text accents in blue to avoid other colors */
     .subtle { color: var(--blue); opacity: .65; }
 
-    /* Header: solid blue block with white text */
+    /* Header (blue) */
     .custom-header{
         background: var(--blue);
-        color: var(--white); border-radius:16px; padding:22px 22px; margin:8px 0 18px;
-        box-shadow: 0 12px 24px var(--blue-20);
+        color: var(--white); border-radius:18px; padding:22px 22px; margin:8px 0 18px;
+        box-shadow: 0 18px 28px var(--blue-15);
     }
-    .custom-header h1 { margin:0 0 4px; font-size:1.5rem; }
+    .custom-header h1 { margin:0 0 4px; font-size:1.6rem; }
     .custom-header p { margin:0; opacity:.92 }
 
-    /* Dataframe links as blue pills */
-    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
-      text-decoration:none;border:1px solid var(--blue-20);padding:.25rem .65rem;border-radius:9999px;
-      background:var(--white);color:var(--blue);display:inline-block;
-    }
-
-    /* Status badges (all-blue scheme) */
-    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600;
-                  border:1px solid var(--blue); color:var(--blue); background:var(--white)}
-
-    /* Sidebar: solid blue with white text */
+    /* Sidebar (green) */
     section[data-testid="stSidebar"] {
-        background: var(--blue) !important; color: var(--white) !important;
+        background: var(--green) !important; color: var(--white) !important;
     }
-    section[data-testid="stSidebar"] .block-container { padding-top:1rem; color: var(--white) !important; }
+    section[data-testid="stSidebar"] .block-container { padding-top:1rem; }
     section[data-testid="stSidebar"] * { color: var(--white) !important; }
     .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:var(--white);
-                 color:var(--blue);font-size:.75rem;margin-top:.25rem }
+                 color:var(--green);font-size:.75rem;margin-top:.25rem }
 
-    /* Radio as cards + blue indicators */
+    /* Navigation radio styles */
     .stRadio > div[role="radiogroup"] > label {
-        background:var(--white); border:1px solid var(--blue-20); border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
-        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px var(--blue-10);
-        color:#000; /* readable text */
+        background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.35); border-radius:14px;
+        padding:.55rem .85rem; margin:.35rem 0; display:flex; gap:.5rem; align-items:center;
+        box-shadow:0 2px 6px rgba(0,0,0,.12);
     }
-    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--blue) !important; }
-    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--blue) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--white) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--white) !important; }
 
-    /* Inputs / selects light blue borders */
+    /* Active nav item */
+    .stRadio > div[role="radiogroup"] > label:has(input:checked) {
+        background: var(--white) !important; color:#000 !important;
+        box-shadow: 0 6px 14px rgba(0,0,0,.18), 0 0 0 2px var(--white) inset;
+    }
+    .stRadio > div[role="radiogroup"] > label:has(input:checked) [data-baseweb="radio"] > div:first-child {
+        border-color: var(--green) !important;
+    }
+    .stRadio > div[role="radiogroup"] > label:has(input:checked) [data-baseweb="radio"] > div:first-child > div {
+        background-color: var(--green) !important;
+    }
+
+    /* Inputs / selects */
     .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
         background:var(--white) !important; border:1px solid var(--blue-20) !important;
     }
@@ -77,18 +77,58 @@ def load_css():
         background:var(--white) !important; border:1px dashed var(--blue-30) !important;
     }
 
-    /* Buttons -> blue background, white text */
-    .stButton > button, .stDownloadButton > button {
-        background: var(--blue) !important; color:var(--white) !important; border:1px solid var(--blue) !important;
-        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px var(--blue-20) !important;
+    /* GREEN primary buttons everywhere (kills red) */
+    .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
+        background: var(--green) !important; color:var(--white) !important; border:1px solid var(--green) !important;
+        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 6px 16px var(--green-20) !important;
     }
-    .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
+    .stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] button:hover { filter:brightness(1.05) !important; }
 
-    /* Neutralize Streamlit alert colors to blue/white */
+    /* Dataframe links as blue pills */
+    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
+      text-decoration:none;border:1px solid var(--blue-20);padding:.25rem .65rem;border-radius:9999px;
+      background:var(--white);color:var(--blue);display:inline-block;
+    }
+
+    /* Single-style status badge */
+    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600;
+                  border:1px solid var(--blue); color:var(--blue); background:var(--white)}
+
+    /* Alerts in blue/white */
     .stAlert { background: var(--white) !important; border:1px solid var(--blue) !important; color: var(--blue) !important; }
     .stAlert [data-testid="stMarkdown"] p, .stAlert p, .stAlert div { color: var(--blue) !important; }
 
-    /* Hide default header/footer chrome */
+    /* Hide 'Press Enter to submit' */
+    [data-testid="stFormSubmitterMessage"] { display:none !important; }
+
+    /* KPI 3D cards */
+    .kpi-grid{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 18px;
+      margin: 6px 0 18px 0;
+    }
+    @media (max-width: 1100px){ .kpi-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 700px){ .kpi-grid{ grid-template-columns: 1fr; } }
+
+    .kpi-card{
+      background: var(--white);
+      border-radius: 16px;
+      padding: 16px 18px;
+      border: 1px solid #e6e6f0;
+      box-shadow:
+        0 18px 30px rgba(0,0,0,.10),
+        0 6px 14px rgba(0,0,0,.06),
+        inset 0 -4px 0 var(--blue-10);
+    }
+    .kpi-title{ font-size: .92rem; color:#2b2b2b; margin: 0 0 8px 0; }
+    .kpi-value{ font-weight: 700; font-size: 1.75rem; color:#1f2937; margin:0; }
+    .kpi-chip{
+      display:inline-block; font-size:.70rem; padding:.2rem .5rem; border-radius:9999px;
+      border:1px solid var(--blue-20); color:var(--blue); background: var(--white);
+    }
+
+    /* Hide default chrome */
     header[data-testid="stHeader"] { background: var(--white); }
     footer { visibility:hidden; }
     #MainMenu, .stDeployButton { visibility:hidden; }
@@ -109,8 +149,22 @@ def create_header(title="HR Document Portal", subtitle="Streamlined document & c
     """, unsafe_allow_html=True)
 
 def create_status_badge(status):
-    # Single all-blue style
     return f'<span class="status-badge">{status}</span>'
+
+def kpi_cards(rows):
+    """rows: list of dicts with keys: title, value, chip (optional)"""
+    html = ['<div class="kpi-grid">']
+    for r in rows:
+        chip = f'<span class="kpi-chip">{r.get("chip","")}</span>' if r.get("chip") else ""
+        html.append(f'''
+        <div class="kpi-card">
+          <div class="kpi-title">{r["title"]}</div>
+          <div class="kpi-value">{r["value"]}</div>
+          {chip}
+        </div>
+        ''')
+    html.append("</div>")
+    st.markdown("\n".join(html), unsafe_allow_html=True)
 
 # ------------------------------ Storage ------------------------------
 
@@ -624,25 +678,24 @@ def page_upload(con, user):
 def page_documents(con, user):
     create_header("Dashboard", "Overview, search and version drilldowns")
 
-    # --- Compact KPI rows ---
-    with st.container():
-        c1, c2, c3, c4 = st.columns(4)
-        docs_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c'])
-        contracts_count = int(pd.read_sql("SELECT COUNT(*) as c FROM contracts WHERE is_deleted=0", con).iloc[0]['c'])
-        recent_uploads = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE date(upload_date) >= date('now','-30 days')", con).iloc[0]['c'])
-        unpublished = 0  # placeholder if you add a field later
-        with c1: st.metric("Total Documents", docs_count)
-        with c2: st.metric("Active Contracts", contracts_count)
-        with c3: st.metric("New last 30 days", recent_uploads)
-        with c4: st.metric("Unpublished Docs", unpublished)
+    # --- KPI 3D cards ---
+    docs_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c'])
+    contracts_count = int(pd.read_sql("SELECT COUNT(*) as c FROM contracts WHERE is_deleted=0", con).iloc[0]['c'])
+    recent_uploads = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE date(upload_date) >= date('now','-30 days')", con).iloc[0]['c'])
+    unpublished = 0  # placeholder if you add a field later
+    sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
+    brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
+    pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
 
-        c5, c6, c7 = st.columns(3)
-        sop_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='SOP'", con).iloc[0]['c'])
-        brd_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='BRD'", con).iloc[0]['c'])
-        pol_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0 AND doc_type='Policy'", con).iloc[0]['c'])
-        with c5: st.metric("SOPs", sop_count)
-        with c6: st.metric("BRDs", brd_count)
-        with c7: st.metric("Policies", pol_count)
+    kpi_cards([
+        {"title":"Total Documents", "value": docs_count},
+        {"title":"Active Contracts", "value": contracts_count},
+        {"title":"New last 30 days", "value": recent_uploads},
+        {"title":"Unpublished Docs", "value": unpublished},
+        {"title":"SOPs", "value": sop_count},
+        {"title":"BRDs", "value": brd_count},
+        {"title":"Policies", "value": pol_count},
+    ])
 
     st.markdown('<div class="custom-card">', unsafe_allow_html=True)
 
