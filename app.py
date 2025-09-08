@@ -1,9 +1,8 @@
 
-# app.py — HR Document Portal (Polished UI)
-# Based on your attached implementation, with a cleaner visual style, inline CSS, and small UX upgrades.
-# - Consistent "primary" buttons (blue), pill-style links, gradient header
-# - Attractive cards and badges without requiring an external style.css
-# - Added "Audit Pack" under Audit Logs for one-click self-serve exports
+# app.py — HR Document Portal (Blue Theme, Fixed CSS)
+# Clean build with polished UI, compact dashboard KPIs, and blue theme.
+# Includes: documents, contracts, deleted files, audit logs (with "Audit Pack"), user management,
+# tokens/serve mode, local storage + optional Dropbox/Google Drive fallbacks.
 
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
 from pathlib import Path
@@ -15,9 +14,8 @@ APP_TITLE = "HR Document Portal"
 
 # ------------------------------ CSS & UI Helpers ------------------------------
 
-
 def load_css():
-    """Inline base styles and theme overrides (ours load last)."""
+    """Inline base styles and theme overrides (quoted safely to avoid SyntaxError)."""
     base_css = """
     :root {
       --c24-blue:#0ea5e9;
@@ -41,10 +39,6 @@ def load_css():
     .custom-header h1 { margin:0 0 4px; font-size:1.5rem; }
     .custom-header p { margin:0; opacity:.92 }
 
-    /* Metric layout (compact) */
-    .metric-compact h3 { margin:.1rem 0; font-size:1.2rem; color:#0f172a }
-    .metric-compact small { color:#6b7280 }
-
     /* Pill links in tables */
     [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
       text-decoration:none;border:1px solid #e5e7eb;padding:.25rem .65rem;border-radius:9999px;
@@ -57,7 +51,7 @@ def load_css():
     .status-expired{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
     .status-review{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}
 
-    /* Sidebar gradient like your reference */
+    /* Sidebar gradient like the reference */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg,#3b82f6 0%, #8bbcff 100%) !important;
     }
@@ -70,6 +64,7 @@ def load_css():
         background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
         display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,.05);
     }
+    /* Blue radio circle */
     .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--c24-blue-700) !important; }
     .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--c24-blue-700) !important; }
 
@@ -98,105 +93,6 @@ def load_css():
     except Exception:
         pass
     st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
-    /* Header */
-    .custom-header{
-        background: linear-gradient(135deg,#1e293b 0%,#0ea5e9 60%,#38bdf8 100%);
-        color:#fff; border-radius:16px; padding:22px 22px; margin:8px 0 18px;
-        box-shadow: 0 12px 24px rgba(2,6,23,.25);
-    }
-    .custom-header h1 { margin:0 0 4px; font-size:1.6rem; }
-    .custom-header p { margin:0; opacity:.9 }
-
-    /* Card wrapper */
-    .custom-card{
-        background:#fff; border:1px solid #e5e7eb; border-radius:16px;
-        padding:18px; margin:8px 0 18px; box-shadow:0 6px 16px rgba(0,0,0,.06);
-    }
-
-    /* Metric cards */
-    .metric-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-    .metric-card{border:1px solid #e5e7eb;border-radius:16px;background:#fff;padding:16px;
-                 display:flex;flex-direction:column;gap:4px;box-shadow:0 4px 10px rgba(0,0,0,.05)}
-    .metric-card h3{margin:0;font-size:1.35rem;color:#111827}
-    .metric-card p{margin:0;color:#6b7280;font-size:.9rem}
-
-    /* Pills for links inside tables */
-    [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
-      text-decoration:none;border:1px solid #e5e7eb;padding:.25rem .65rem;border-radius:9999px;
-      background:#fff;color:#111;display:inline-block;
-    }
-
-    /* Badges */
-    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600}
-    .status-active{background:#dcfce7;color:#065f46;border:1px solid #86efac}
-    .status-expired{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
-    .status-review{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}
-
-    .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:#e0e7ff;
-                 color:#3730a3;font-size:.75rem;margin-top:.25rem }
-
-    /* Primary buttons (unified) */
-    .stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"] {
-        background:#2563EB; color:#fff; border:1px solid #2563EB; border-radius:9999px; padding:.5rem 1rem;
-    }
-    .stButton > button[kind="primary"]:hover, .stDownloadButton > button[kind="primary"]:hover {
-        filter:brightness(1.05);
-    }
-
-    /* Sidebar spacing */
-    section[data-testid="stSidebar"] .block-container { padding-top: 1rem; }
-
-    /* Fix selectbox/dropdown clipping */
-    .stSelectbox [data-baseweb="select"] > div { min-width: 150px !important; padding-right: 40px !important; }
-    .stSelectbox [role="combobox"] { min-width: 150px !important; width: 100% !important; white-space: nowrap !important; }
-    .stSelectbox [data-baseweb="menu"] {
-        z-index: 999999 !important; position: fixed !important; background: #fff !important;
-        border: 1px solid #e5e7eb !important; border-radius: 10px !important; box-shadow: 0 10px 30px rgba(0,0,0,.12) !important;
-    }
-    .main > div, .block-container, .element-container, div[data-testid="stForm"], div[data-testid="column"] {
-        overflow: visible !important;
-    }
-    """
-    st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
-    st.markdown(f"<style>"+'''
-    /* Global accent and positive blues */
-    :root { --c24-blue:#2563EB; --c24-blue-100:#eff6ff; --c24-blue-200:#dbeafe; --c24-blue-300:#bfdbfe; }
-    /* Buttons: make all Streamlit buttons blue by default */
-    .stButton > button, .stDownloadButton > button {
-        background: var(--c24-blue) !important; color:#fff !important; border:1px solid var(--c24-blue) !important;
-        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px rgba(37,99,235,.25) !important;
-    }
-    .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
-    /* Checkboxes / Radios accent */
-    input[type=\"radio\"], input[type=\"checkbox\"] { accent-color: var(--c24-blue) !important; }
-    /* Sidebar gradient */
-    section[data-testid=\"stSidebar\"] {
-        background: linear-gradient(180deg,#3b82f6 0%, #8ab5ff 100%) !important;
-    }
-    section[data-testid=\"stSidebar\"] .block-container { color:#0f172a !important; }
-    /* Radio options as cards */
-    .stRadio > div[role=\"radiogroup\"] > label {
-        background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:.65rem .9rem; margin:.35rem 0;
-        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,.05);
-    }
-    /* Inputs / selects subtle blue fill */
-    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
-        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
-    }
-    .stSelectbox [data-baseweb=\"select\"] > div {
-        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
-    }
-    /* File uploader dropzone */
-    .stFileUploader div[data-testid=\"stFileUploaderDropzone\"] {
-        background:#f8fbff !important; border:1px dashed var(--c24-blue-300) !important;
-    }
-''' + "</style>", unsafe_allow_html=True)
-    # Try to append style.css if present
-    try:
-        with open("style.css", "r", encoding="utf-8") as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-    except Exception:
-        pass
 
 def create_header(title="HR Document Portal", subtitle="Streamlined document & contract management"):
     st.markdown(f"""
@@ -205,14 +101,6 @@ def create_header(title="HR Document Portal", subtitle="Streamlined document & c
       <p>{subtitle}</p>
     </div>
     """, unsafe_allow_html=True)
-
-def create_metric_card(title, value, icon="📊"):
-    return f"""
-    <div class="metric-card">
-        <h3>{icon} {value}</h3>
-        <p>{title}</p>
-    </div>
-    """
 
 def create_status_badge(status):
     status_classes = {
@@ -343,51 +231,10 @@ def gdrive_exists(file_id: str) -> bool:
     except Exception:
         return False
 
-# ------------------------------ Storage helpers ------------------------------
+# ------------------------------ Helpers ------------------------------
 
-def is_dbx_path(p: str) -> bool:
-    return p.startswith("dbx:/")
-
-def to_display_name(p: str) -> str:
-    if p.startswith("gdrive:"):
-        parts = p.split(":", 2)
-        return parts[2] if len(parts) > 2 else "file"
-    return Path(p.split(":", 1)[1] if is_dbx_path(p) else p).name
-
-def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: int, filename: str) -> str:
-    safe_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
-    if USE_GDRIVE:
-        file_id = gdrive_upload_bytes([doc_type, safe_name, f"v{version}"], filename, data)
-        return f"gdrive:{file_id}:{filename}"
-    if USE_DROPBOX:
-        remote_dir = dbx_path(doc_type, safe_name, f"v{version}")
-        remote_file = remote_dir + "/" + filename
-        dbx_upload_bytes(remote_file, data)
-        return "dbx:" + remote_file
-    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"
-    subdir.mkdir(parents=True, exist_ok=True)
-    local_file = subdir / filename
-    local_file.write_bytes(data)
-    return "local:" + str(local_file)
-
-def read_ref_bytes(ref: str) -> bytes | None:
-    if ref.startswith("gdrive:"):
-        file_id = ref.split(":", 2)[1]
-        return gdrive_download_bytes(file_id)
-    if is_dbx_path(ref):
-        return dbx_download_bytes(ref.split(":", 1)[1])
-    p = Path(ref.split(":", 1)[1])
-    return p.read_bytes() if p.exists() else None
-
-def ref_exists(ref: str) -> bool:
-    if ref.startswith("gdrive:"):
-        file_id = ref.split(":", 2)[1]
-        return gdrive_exists(file_id)
-    if is_dbx_path(ref):
-        return dbx_exists(ref.split(":", 1)[1])
-    return Path(ref.split(":", 1)[1]).exists()
-
-# ------------------------------ Database ------------------------------
+def sha256_bytes(b):
+    h = hashlib.sha256(); h.update(b); return h.hexdigest()
 
 def _hash(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
@@ -482,7 +329,7 @@ def init_db():
         )
         con.commit()
 
-    # Non-breaking schema adds (guarded)
+    # Safe schema adds
     for stmt in [
         "ALTER TABLE documents ADD COLUMN remarks TEXT",
         "ALTER TABLE contracts ADD COLUMN remarks TEXT",
@@ -507,8 +354,6 @@ def insert_audit(con, actor, action, doc_id=None, details=""):
     )
     con.commit()
     backup_db_to_dropbox()
-
-# ------------------------------ Auth & tokens ------------------------------
 
 def authenticate(username, password, con):
     cur = con.execute("SELECT email,password_sha256,role FROM users WHERE email=?", (username.strip().lower(),))
@@ -590,6 +435,48 @@ def make_zip(refs: list) -> bytes:
                     zf.writestr(to_display_name(ref), data)
     return buf.getvalue()
 
+def is_dbx_path(p: str) -> bool:
+    return p.startswith("dbx:/")
+
+def to_display_name(p: str) -> str:
+    if p.startswith("gdrive:"):
+        parts = p.split(":", 2)
+        return parts[2] if len(parts) > 2 else "file"
+    return Path(p.split(":", 1)[1] if is_dbx_path(p) else p).name
+
+def write_bytes_return_ref(data: bytes, *, doc_type: str, name: str, version: int, filename: str) -> str:
+    safe_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+    if USE_GDRIVE:
+        file_id = gdrive_upload_bytes([doc_type, safe_name, f"v{version}"], filename, data)
+        return f"gdrive:{file_id}:{filename}"
+    if USE_DROPBOX:
+        remote_dir = dbx_path(doc_type, safe_name, f"v{version}")
+        remote_file = remote_dir + "/" + filename
+        dbx_upload_bytes(remote_file, data)
+        return "dbx:" + remote_file
+    subdir = LOCAL_STORAGE_DIR / doc_type / safe_name / f"v{version}"
+    subdir.mkdir(parents=True, exist_ok=True)
+    local_file = subdir / filename
+    local_file.write_bytes(data)
+    return "local:" + str(local_file)
+
+def read_ref_bytes(ref: str) -> bytes | None:
+    if ref.startswith("gdrive:"):
+        file_id = ref.split(":", 2)[1]
+        return gdrive_download_bytes(file_id)
+    if is_dbx_path(ref):
+        return dbx_download_bytes(ref.split(":", 1)[1])
+    p = Path(ref.split(":", 1)[1])
+    return p.read_bytes() if p.exists() else None
+
+def ref_exists(ref: str) -> bool:
+    if ref.startswith("gdrive:"):
+        file_id = ref.split(":", 2)[1]
+        return gdrive_exists(file_id)
+    if is_dbx_path(ref):
+        return dbx_exists(ref.split(":", 1)[1])
+    return Path(ref.split(":", 1)[1]).exists()
+
 def _days_to_expiry(end_series):
     end_dt = pd.to_datetime(end_series, errors="coerce")
     today_ts = pd.Timestamp(dt.date.today())
@@ -628,7 +515,7 @@ def rename_columns(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
 
 # ------------------------------ Pages ------------------------------
 
-def versions_with_links(con, versions_df):
+def ensure_tokens_docs(con, versions_df):
     df = versions_df.copy()
     view_doc, view_email = [], []
     for r in df.itertuples():
@@ -641,7 +528,7 @@ def versions_with_links(con, versions_df):
     df["is_latest"] = [True if i == 0 else False for i in range(len(df))]
     return df
 
-def versions_with_links_contracts(con, versions_df):
+def ensure_tokens_contracts(con, versions_df):
     df = versions_df.copy()
     view_doc, view_email = [], []
     for r in df.itertuples():
@@ -664,7 +551,7 @@ def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con
         key=f"del_{entity}_reason",
         help="Add a short justification; it will be recorded in the Audit Logs."
     )
-    if st.button("Delete Version", key=f"btn_del_{entity}", type="primary"):
+    if st.button("Delete Version", key=f"btn_del_{entity}"):
         if not reason.strip():
             st.error("Please enter a reason."); return
         row_id = int(versions_df.loc[versions_df["version"] == sel_v, "id"].iloc[0])
@@ -733,11 +620,10 @@ def page_upload(con, user):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 def page_documents(con, user):
     create_header("Dashboard", "Overview, search and version drilldowns")
 
-    # --- Compact KPI rows (avoid HTML printing issues) ---
+    # --- Compact KPI rows ---
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
         docs_count = int(pd.read_sql("SELECT COUNT(*) as c FROM documents WHERE is_deleted=0", con).iloc[0]['c'])
@@ -821,7 +707,7 @@ def page_documents(con, user):
             "SELECT * FROM contracts WHERE name=? AND vendor=? AND is_deleted=0 ORDER BY version DESC",
             con, params=(sel_group["name"], sel_group["vendor"])
         )
-        v_table = versions_with_links_contracts(con, versions)
+        v_table = ensure_tokens_contracts(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","status",
                           "start_date","end_date","remarks","Document Link","Approval Link"]]
         v_show = rename_columns(v_show, {"version":"Version","upload_date":"Uploaded On","uploaded_by":"Uploaded By",
@@ -839,7 +725,7 @@ def page_documents(con, user):
             "SELECT * FROM documents WHERE doc_type=? AND name=? AND is_deleted=0 ORDER BY version DESC",
             con, params=(sel_group["doc_type"], sel_group["name"])
         )
-        v_table = versions_with_links(con, versions)
+        v_table = ensure_tokens_docs(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","approved_by","is_latest","remarks","Document Link","Approval Link"]]
         v_show = rename_columns(v_show, {"version":"Version","upload_date":"Uploaded On","uploaded_by":"Uploaded By",
                                          "approved_by":"Approved By","is_latest":"Is Latest","remarks":"Remarks"})
@@ -878,7 +764,8 @@ def page_contracts(con, user):
 
         if ok:
             if not name or not vendor or not doc or not remarks.strip():
-                st.error("Please fill Contract Name, Vendor, Contract file, and Remarks / Context."); st.markdown('</div>', unsafe_allow_html=True); return
+                st.error("Please fill Contract Name, Vendor, Contract file, and Remarks / Context.")
+                st.markdown('</div>', unsafe_allow_html=True); return
             data = doc.read()
             cur = con.execute("SELECT MAX(version) FROM contracts WHERE name=? AND vendor=?", (name, vendor))
             maxv = cur.fetchone()[0]
@@ -949,7 +836,7 @@ def page_contracts(con, user):
         if pick:
             sel_group = groups.iloc[labels.index(pick)]
             versions = f[(f["vendor"] == sel_group["vendor"]) & (f["name"] == sel_group["name"])].sort_values("version", ascending=False)
-            v_table = versions_with_links_contracts(con, versions)
+            v_table = ensure_tokens_contracts(con, versions)
             v_show = v_table[["version","upload_date","uploaded_by","status","start_date","end_date","remarks","Document Link","Approval Link"]]
             v_show = rename_columns(v_show, {"version":"Version","upload_date":"Uploaded On","uploaded_by":"Uploaded By",
                                              "status":"Status","start_date":"Start Date","end_date":"End Date","remarks":"Remarks"})
@@ -1253,7 +1140,7 @@ def main():
                 pages += ["🗑️ Deleted Files","📊 Audit Logs","👥 User Management"]
             choice = st.radio("Navigate", pages, index=0, key="nav_radio")
             st.write("")
-            if st.button("Logout", key="logout_btn"):
+            if st.button("Logout", key="logout_btn", type="primary"):
                 tok = st.query_params.get("auth", None)
                 if tok: delete_auth_token(con, tok)
                 if "auth" in st.query_params: del st.query_params["auth"]
