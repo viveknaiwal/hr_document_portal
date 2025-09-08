@@ -1,9 +1,4 @@
 
-# app.py — HR Document Portal (Blue Theme, Fixed CSS)
-# Clean build with polished UI, compact dashboard KPIs, and blue theme.
-# Includes: documents, contracts, deleted files, audit logs (with "Audit Pack"), user management,
-# tokens/serve mode, local storage + optional Dropbox/Google Drive fallbacks.
-
 import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
 from pathlib import Path
 from io import BytesIO
@@ -15,78 +10,89 @@ APP_TITLE = "HR Document Portal"
 # ------------------------------ CSS & UI Helpers ------------------------------
 
 def load_css():
-    """Inline base styles and theme overrides (quoted safely to avoid SyntaxError)."""
+    """Blue & White ONLY theme. No other colors used in custom styles."""
     base_css = """
     :root {
-      --c24-blue:#0ea5e9;
-      --c24-blue-600:#2563EB;
-      --c24-blue-700:#1d4ed8;
-      --c24-blue-800:#1e40af;
-      --c24-blue-900:#0f2e5a;
-      --c24-blue-100:#eff6ff;
-      --c24-blue-200:#dbeafe;
-      --c24-blue-300:#bfdbfe;
+      --blue:#3333FF; /* electric blue */
+      --blue-10:#3333FF1A; /* 10% alpha */
+      --blue-15:#3333FF26;
+      --blue-20:#3333FF33;
+      --blue-30:#3333FF4D;
+      --blue-60:#3333FF99;
+      --white:#FFFFFF;
+    }
+    html, body, [data-testid="stAppViewContainer"] {
+      background: var(--white) !important;
     }
     .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
-    .subtle { color: #6b7280; }
 
-    /* Header gradient */
+    /* Neutral text accents in blue to avoid other colors */
+    .subtle { color: var(--blue); opacity: .65; }
+
+    /* Header: solid blue block with white text */
     .custom-header{
-        background: linear-gradient(135deg,#0f3d52 0%, var(--c24-blue) 55%, #38bdf8 100%);
-        color:#fff; border-radius:16px; padding:22px 22px; margin:8px 0 18px;
-        box-shadow: 0 12px 24px rgba(2,6,23,.25);
+        background: var(--blue);
+        color: var(--white); border-radius:16px; padding:22px 22px; margin:8px 0 18px;
+        box-shadow: 0 12px 24px var(--blue-20);
     }
     .custom-header h1 { margin:0 0 4px; font-size:1.5rem; }
     .custom-header p { margin:0; opacity:.92 }
 
-    /* Pill links in tables */
+    /* Dataframe links as blue pills */
     [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
-      text-decoration:none;border:1px solid #e5e7eb;padding:.25rem .65rem;border-radius:9999px;
-      background:#fff;color:#111;display:inline-block;
+      text-decoration:none;border:1px solid var(--blue-20);padding:.25rem .65rem;border-radius:9999px;
+      background:var(--white);color:var(--blue);display:inline-block;
     }
 
-    /* Status badges */
-    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600}
-    .status-active{background:#dcfce7;color:#065f46;border:1px solid #86efac}
-    .status-expired{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
-    .status-review{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}
+    /* Status badges (all-blue scheme) */
+    .status-badge{border-radius:9999px;font-size:.75rem;padding:.15rem .5rem;font-weight:600;
+                  border:1px solid var(--blue); color:var(--blue); background:var(--white)}
 
-    /* Sidebar gradient like the reference */
+    /* Sidebar: solid blue with white text */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg,#3b82f6 0%, #8bbcff 100%) !important;
+        background: var(--blue) !important; color: var(--white) !important;
     }
-    section[data-testid="stSidebar"] .block-container { padding-top:1rem; color:#0f172a; }
-    .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:#e0e7ff;
-                 color:#3730a3;font-size:.75rem;margin-top:.25rem }
+    section[data-testid="stSidebar"] .block-container { padding-top:1rem; color: var(--white) !important; }
+    section[data-testid="stSidebar"] * { color: var(--white) !important; }
+    .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:var(--white);
+                 color:var(--blue);font-size:.75rem;margin-top:.25rem }
 
     /* Radio as cards + blue indicators */
     .stRadio > div[role="radiogroup"] > label {
-        background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
-        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,.05);
+        background:var(--white); border:1px solid var(--blue-20); border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
+        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px var(--blue-10);
+        color:#000; /* readable text */
     }
-    /* Blue radio circle */
-    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--c24-blue-700) !important; }
-    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--c24-blue-700) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--blue) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--blue) !important; }
 
-    /* Inputs / selects subtle blue fill */
+    /* Inputs / selects light blue borders */
     .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
-        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
+        background:var(--white) !important; border:1px solid var(--blue-20) !important;
     }
     .stSelectbox [data-baseweb="select"] > div {
-        background:#f8fbff !important; border:1px solid var(--c24-blue-200) !important;
+        background:var(--white) !important; border:1px solid var(--blue-20) !important;
     }
     .stFileUploader div[data-testid="stFileUploaderDropzone"] {
-        background:#f1f5ff !important; border:1px dashed var(--c24-blue-300) !important;
+        background:var(--white) !important; border:1px dashed var(--blue-30) !important;
     }
 
-    /* Buttons default to positive blue */
+    /* Buttons -> blue background, white text */
     .stButton > button, .stDownloadButton > button {
-        background: var(--c24-blue-600) !important; color:#fff !important; border:1px solid var(--c24-blue-600) !important;
-        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px rgba(37,99,235,.25) !important;
+        background: var(--blue) !important; color:var(--white) !important; border:1px solid var(--blue) !important;
+        border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px var(--blue-20) !important;
     }
     .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
+
+    /* Neutralize Streamlit alert colors to blue/white */
+    .stAlert { background: var(--white) !important; border:1px solid var(--blue) !important; color: var(--blue) !important; }
+    .stAlert [data-testid="stMarkdown"] p, .stAlert p, .stAlert div { color: var(--blue) !important; }
+
+    /* Hide default header/footer chrome */
+    header[data-testid="stHeader"] { background: var(--white); }
+    footer { visibility:hidden; }
+    #MainMenu, .stDeployButton { visibility:hidden; }
     """
-    # Load user style first (if exists), then our overrides last so we win precedence
     try:
         with open("style.css", "r", encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
@@ -103,13 +109,8 @@ def create_header(title="HR Document Portal", subtitle="Streamlined document & c
     """, unsafe_allow_html=True)
 
 def create_status_badge(status):
-    status_classes = {
-        "Active": "status-active",
-        "Expired": "status-expired",
-        "Under review": "status-review"
-    }
-    class_name = status_classes.get(status, "status-review")
-    return f'<span class="status-badge {class_name}">{status}</span>'
+    # Single all-blue style
+    return f'<span class="status-badge">{status}</span>'
 
 # ------------------------------ Storage ------------------------------
 
@@ -690,7 +691,7 @@ def page_documents(con, user):
 
     st.markdown("---")
     st.markdown("### Document Versions")
-    groups = g.drop_duplicates(subset=["doc_type","name","vendor"])
+    groups = g.drop_duplicates(subset=["doc_type","name","vendor"]) if "vendor" in g.columns else g.drop_duplicates(subset=["doc_type","name"])
     labels = [f"{r.doc_type} — {r.name}" for r in groups.itertuples()]
     if not labels:
         st.markdown('</div>', unsafe_allow_html=True)
@@ -705,7 +706,7 @@ def page_documents(con, user):
     if sel_group["doc_type"] == "Contract":
         versions = pd.read_sql(
             "SELECT * FROM contracts WHERE name=? AND vendor=? AND is_deleted=0 ORDER BY version DESC",
-            con, params=(sel_group["name"], sel_group["vendor"])
+            con, params=(sel_group["name"], sel_group["vendor"]) if "vendor" in sel_group else (sel_group["name"], "")
         )
         v_table = ensure_tokens_contracts(con, versions)
         v_show = v_table[["version","upload_date","uploaded_by","status",
@@ -714,7 +715,7 @@ def page_documents(con, user):
                                          "status":"Status","start_date":"Start Date","end_date":"End Date","remarks":"Remarks"})
         st.data_editor(
             v_show, use_container_width=True, disabled=True,
-            key=f"docs_contracts_versions_{sel_group['vendor']}_{sel_group['name']}",
+            key=f"docs_contracts_versions_{sel_group['vendor'] if 'vendor' in sel_group else ''}_{sel_group['name']}",
             column_config={"Document Link": st.column_config.LinkColumn("Document Link"),
                            "Approval Link": st.column_config.LinkColumn("Approval Link")}
         )
@@ -829,7 +830,7 @@ def page_contracts(con, user):
     st.dataframe(f_display, use_container_width=True)
 
     st.markdown("### Version History")
-    groups = f.drop_duplicates(subset=["vendor","name"])
+    groups = f.drop_duplicates(subset=["vendor","name"]) if not f.empty else f
     labels = [f"{r.vendor} — {r.name}" for r in groups.itertuples()]
     if labels:
         pick = st.selectbox("Select Contract", labels, key="contracts_group_pick")
