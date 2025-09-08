@@ -10,29 +10,47 @@ APP_TITLE = "HR Document Portal"
 # ------------------------------ CSS & UI Helpers ------------------------------
 
 def load_css():
-    """Inline base styles and theme overrides."""
+    """Inline base styles and theme overrides per spec:
+       - Blue headers/sidebar: #1B60AA
+       - Green primary buttons: #19D107 (except login which is blue)
+       - No red accents except explicit danger areas
+       - KPI cards included
+       - Hide "Press Enter to apply/submit" hints
+    """
     base_css = """
     :root {
-      --primary-blue:#1B60AA;   /* requested blue */
-      --primary-blue-10: #1B60AA1A;
-      --primary-blue-20: #1B60AA33;
-      --primary-blue-30: #1B60AA4D;
-      --primary-green:#19D107;  /* requested green */
+      --primary-blue:#1B60AA;
+      --primary-blue-08:#1B60AA14;
+      --primary-blue-16:#1B60AA29;
+      --primary-green:#19D107;
+      --danger-red:#EF4444;
+      --text-dark:#0f172a;
+      --muted:#6b7280;
     }
 
     .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
-    .subtle { color: #6b7280; }
+    .subtle { color: #ffffff; } /* sidebar subtle text to white */
 
-    /* Header: solid blue */
+    /* App background */
+    body { background: #f6f8fb; }
+
+    /* Header: blue with white text */
     .custom-header{
         background: var(--primary-blue);
         color:#fff; border-radius:16px; padding:22px 22px; margin:8px 0 18px;
         box-shadow: 0 12px 24px rgba(0,0,0,.18);
     }
-    .custom-header h1 { margin:0 0 4px; font-size:1.5rem; }
-    .custom-header p { margin:0; opacity:.92 }
+    .custom-header h1 { margin:0 0 4px; font-size:1.5rem; color:#fff; }
+    .custom-header p { margin:0; opacity:.95; color:#fff; }
 
-    /* Pill links in tables */
+    /* Section header helper */
+    .section-header {
+        background: var(--primary-blue); color:#fff; padding:10px 14px; border-radius:10px;
+        margin: 12px 0 10px; font-weight:700;
+        box-shadow: 0 8px 16px rgba(0,0,0,.12);
+    }
+
+    /* Tables: pill links */
     [data-testid="stDataFrame"] a, [data-testid="stDataEditor"] a, [data-testid="stTable"] a {
       text-decoration:none;border:1px solid #e5e7eb;padding:.25rem .65rem;border-radius:9999px;
       background:#fff;color:#111;display:inline-block;
@@ -44,51 +62,68 @@ def load_css():
     .status-expired{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
     .status-review{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe}
 
-    /* Sidebar: solid blue */
+    /* Sidebar: solid blue, all text white */
     section[data-testid="stSidebar"] {
         background: var(--primary-blue) !important;
         color:#fff !important;
     }
     section[data-testid="stSidebar"] .block-container { padding-top:1rem; color:#fff; }
+    section[data-testid="stSidebar"] * { color:#fff !important; }
     .role-pill { display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:#fff;
                  color:var(--primary-blue);font-size:.75rem;margin-top:.25rem }
 
-    /* Radio as cards + blue indicators */
-    .stRadio > div[role="radiogroup"] > label {
-        background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
-        display:flex; gap:.5rem; align-items:center; box-shadow:0 4px 10px rgba(0,0,0,.05); color:#111;
+    /* Sidebar radio nav: card-like options, readable text */
+    section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] > label {
+        background: rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.30);
+        border-radius:14px; padding:.55rem .85rem; margin:.35rem 0;
+        display:flex; gap:.5rem; align-items:center;
     }
-    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--primary-blue) !important; }
-    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--primary-blue) !important; }
+    section[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] > label:hover {
+        border-color:#fff; box-shadow: inset 0 0 0 1px #fff;
+    }
+    /* Radio circle: green dot, blue ring */
+    .stRadio [data-baseweb="radio"] > div:first-child { border-color: var(--primary-blue) !important; box-shadow: 0 0 0 3px var(--primary-blue-08) !important; }
+    .stRadio [data-baseweb="radio"] > div:first-child > div { background-color: var(--primary-green) !important; }
 
-    /* Inputs / selects subtle blue border */
+    /* Inputs / selects borders */
     .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
-        background:#fff !important; border:1px solid var(--primary-blue-20) !important;
+        background:#fff !important; border:1px solid var(--primary-blue-16) !important;
     }
     .stSelectbox [data-baseweb="select"] > div {
-        background:#fff !important; border:1px solid var(--primary-blue-20) !important;
+        background:#fff !important; border:1px solid var(--primary-blue-16) !important;
     }
     .stFileUploader div[data-testid="stFileUploaderDropzone"] {
-        background:#f6faff !important; border:1px dashed var(--primary-blue-30) !important;
+        background:#f6faff !important; border:1px dashed var(--primary-blue-16) !important;
     }
 
-    /* Buttons: green */
+    /* Buttons: global green */
     .stButton > button, .stDownloadButton > button {
         background: var(--primary-green) !important; color:#fff !important; border:1px solid var(--primary-green) !important;
         border-radius: 9999px !important; padding:.55rem 1rem !important; box-shadow: 0 4px 12px rgba(0,0,0,.12) !important;
     }
     .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(1.05) !important; }
 
-    /* KPI Cards (3D style) */
+    /* Tabs: selection and hover blue */
+    .stTabs [data-baseweb="tab"] { color: var(--text-dark); }
+    .stTabs [aria-selected="true"] { color: var(--primary-blue) !important; border-color: var(--primary-blue) !important; }
+    .stTabs [data-baseweb="tab"]:hover { color: var(--primary-blue) !important; }
+
+    /* Danger zone (delete buttons only) */
+    .danger-zone .stButton > button { background: var(--danger-red) !important; border-color: var(--danger-red) !important; }
+
+    /* KPI Cards */
     .kpi-grid{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:18px; margin: 6px 0 18px; }
     @media (max-width: 1100px){ .kpi-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
     @media (max-width: 700px){ .kpi-grid{ grid-template-columns: 1fr; } }
     .kpi-card{
       background:#fff; border-radius:16px; padding:16px 18px; border:1px solid #eef0f5;
-      box-shadow: 0 20px 30px rgba(0,0,0,.12), 0 8px 12px rgba(0,0,0,.06), inset 0 -3px 0 var(--primary-blue-10);
+      box-shadow: 0 20px 30px rgba(0,0,0,.10), 0 8px 12px rgba(0,0,0,.06), inset 0 -3px 0 var(--primary-blue-08);
     }
     .kpi-title{ font-size:.92rem; color:#546170; margin:0 0 8px 0; }
     .kpi-value{ font-weight:700; font-size:1.75rem; color:#0f172a; margin:0; }
+
+    /* Hide "Press enter to apply/submit" helper lines */
+    [data-testid="stWidgetInstructions"], [data-testid="InputInstructions"] { display:none !important; }
     """
     try:
         with open("style.css", "r", encoding="utf-8") as f:
@@ -105,6 +140,9 @@ def create_header(title="HR Document Portal", subtitle="Streamlined document & c
     </div>
     """, unsafe_allow_html=True)
 
+def section_header(title: str):
+    st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
+
 def create_status_badge(status):
     status_classes = {
         "Active": "status-active",
@@ -114,7 +152,7 @@ def create_status_badge(status):
     class_name = status_classes.get(status, "status-review")
     return f'<span class="status-badge {class_name}">{status}</span>'
 
-# ---------- KPI helper (error‑free, compact HTML so Streamlit doesn't treat it as code) ----------
+# ---------- KPI helper ----------
 def kpi_cards(rows):
     """rows = list of {title, value}."""
     parts = ['<div class="kpi-grid">']
@@ -551,7 +589,7 @@ def ensure_tokens_contracts(con, versions_df):
     return df
 
 def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con, user):
-    st.markdown("#### Delete")
+    section_header("Delete")
     sel_v = st.selectbox(
         "Version to delete",
         versions_df["version"].tolist(),
@@ -562,7 +600,13 @@ def delete_version_ui(*, entity: str, table: str, versions_df: pd.DataFrame, con
         key=f"del_{entity}_reason",
         help="Add a short justification; it will be recorded in the Audit Logs."
     )
-    if st.button("Delete Version", key=f"btn_del_{entity}"):
+    confirm = st.checkbox("I understand this action is permanent", key=f"del_{entity}_confirm")
+    st.markdown('<div class="danger-zone">', unsafe_allow_html=True)
+    try_delete = st.button("Delete Version", key=f"btn_del_{entity}")
+    st.markdown('</div>', unsafe_allow_html=True)
+    if try_delete:
+        if not confirm:
+            st.error("Please confirm the deletion checkbox."); return
         if not reason.strip():
             st.error("Please enter a reason."); return
         row_id = int(versions_df.loc[versions_df["version"] == sel_v, "id"].iloc[0])
@@ -618,7 +662,7 @@ def page_upload(con, user):
         con.execute(
             """INSERT INTO documents
                (doc_type,name,created_date,upload_date,approved_by,file_path,email_path,version,uploaded_by,hash_sha256,is_deleted,file_token,email_token,remarks)
-               VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""" ,
             (doc_type, name, str(created_date), dt.datetime.utcnow().isoformat(),
              approved_by, file_ref, email_ref, version, user["username"], sha256_bytes(data), ft, et, remarks.strip())
         )
@@ -699,7 +743,7 @@ def page_documents(con, user):
     st.dataframe(g_display, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("### Document Versions")
+    section_header("Document Versions")
     groups = g.drop_duplicates(subset=["doc_type","name","vendor"])
     labels = [f"{r.doc_type} — {r.name}" for r in groups.itertuples()]
     if not labels:
@@ -805,6 +849,7 @@ def page_contracts(con, user):
             st.success(f"Contract uploaded as version {version}")
 
     st.markdown("---")
+    section_header("Version History")
     df = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=0", con)
     if df.empty:
         st.info("No contracts yet."); st.markdown('</div>', unsafe_allow_html=True); return
@@ -956,7 +1001,7 @@ def page_audit(con, user=None):
         st.dataframe(f, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("#### Audit Pack (for external auditors)")
+    section_header("Audit Pack (for external auditors)")
     c1, c2 = st.columns(2)
     with c1: start = st.date_input("Start", dt.date.today().replace(day=1), key="audit_pack_start")
     with c2: end = st.date_input("End", dt.date.today(), key="audit_pack_end")
@@ -986,7 +1031,7 @@ def page_manage_users(con, user):
             db_role_val = role.lower()
             try:
                 con.execute(
-                    "INSERT INTO users (email,password_sha256,role,created_date) VALUES (?,?,?,?)",
+                    """INSERT INTO users (email,password_sha256,role,created_date) VALUES (?,?,?,?)""",
                     (email.strip().lower(), _hash(pwd), db_role_val, dt.datetime.utcnow().isoformat()),
                 )
                 con.commit()
@@ -1004,10 +1049,17 @@ def page_manage_users(con, user):
 
     if not df.empty:
         del_id = st.selectbox("Delete User ID", df["ID"], key="u_del_id")
-        if st.button("Delete User", key="u_del_btn", type="primary"):
+        confirm_email = st.text_input("Type the email to confirm deletion", key="confirm_email_delete")
+        agree = st.checkbox("I confirm I want to delete this user", key="confirm_user_delete")
+        st.markdown('<div class="danger-zone">', unsafe_allow_html=True)
+        do_del = st.button("Delete User", key="u_del_btn", type="primary")
+        st.markdown('</div>', unsafe_allow_html=True)
+        if do_del:
             target_email = df[df["ID"] == del_id]["Email"].iloc[0]
             if target_email == user["username"]:
                 st.error("You cannot delete yourself.")
+            elif not agree or confirm_email.strip().lower() != target_email.strip().lower():
+                st.error("Please tick the confirmation and type the user's email exactly.")
             else:
                 con.execute("DELETE FROM users WHERE id=?", (int(del_id),))
                 con.commit()
@@ -1020,10 +1072,17 @@ def page_manage_users(con, user):
 # ------------------------------ Login (classic minimal) ------------------------------
 
 def style_login():
-    st.markdown("""
+    st.markdown(f"""
     <style>
-      header[data-testid="stHeader"] { display:none !important; }
-      #MainMenu, .stDeployButton, footer { visibility:hidden; }
+      header[data-testid="stHeader"] {{ display:none !important; }}
+      #MainMenu, .stDeployButton, footer {{ visibility:hidden; }}
+      /* Login: blue primary button, blue checkbox, blue title */
+      .stButton > button {{ background: var(--primary-blue) !important; border-color: var(--primary-blue) !important; }}
+      .stCheckbox [data-baseweb="checkbox"] > div {{ border-color: var(--primary-blue) !important; }}
+      .stCheckbox [data-baseweb="checkbox"] svg {{ color: var(--primary-blue) !important; }}
+      h1 {{ color: var(--primary-blue) !important; }}
+      /* Hide press enter hints here too */
+      [data-testid="stWidgetInstructions"], [data-testid="InputInstructions"] {{ display:none !important; }}
     </style>
     """, unsafe_allow_html=True)
 
