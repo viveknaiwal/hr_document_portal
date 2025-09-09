@@ -1,9 +1,16 @@
-import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
+# app.py
+import base64
+import hashlib
+import datetime as dt
+import sqlite3
+import mimetypes
+import secrets
+import zipfile
 from pathlib import Path
 from io import BytesIO
+
 import pandas as pd
 import streamlit as st
-import mimetypes
 
 APP_TITLE = "HR Document Portal"
 
@@ -933,7 +940,7 @@ def page_deleted(con, user):
                     st.success("Restored"); st.rerun()
 
     with tab_contracts:
-        dfc = st.read_sql("SELECT * FROM contracts WHERE is_deleted=1 ORDER BY upload_date DESC", con) if False else pd.read_sql("SELECT * FROM contracts WHERE is_deleted=1 ORDER BY upload_date DESC", con)
+        dfc = pd.read_sql("SELECT * FROM contracts WHERE is_deleted=1 ORDER BY upload_date DESC", con)
         if dfc.empty:
             st.info("No deleted contracts.")
         else:
@@ -1072,19 +1079,12 @@ def page_manage_users(con, user):
 # ------------------------------ Login (branded background + right card) ------------------------------
 
 def style_login(bg_path: str = "assets/login-bg.png"):
-    """Login-only styles: full-page background image + right-aligned login card.
-
-    Background is scoped to the login container via a pseudo-element so it doesn't
-    affect post-login pages.
-    """
-    # Inline the background image as base64 (local asset or a fallback path)
+    """Login-only styles: full-page background image + right-aligned login card."""
     b64 = ""
     try:
         p = Path(bg_path)
-        if not p.exists():
-            # fallback to your provided path
-            p = Path("/mnt/data/e4bb2f00-ac33-4cdd-b246-28e4f9f0d1de.png")
-        b64 = base64.b64encode(p.read_bytes()).decode("utf-8")
+        if p.exists():
+            b64 = base64.b64encode(p.read_bytes()).decode("utf-8")
     except Exception:
         pass
 
@@ -1105,13 +1105,12 @@ def style_login(bg_path: str = "assets/login-bg.png"):
             z-index: 1;
           }}
 
-          /* Background is a pseudo-element so it only exists on login */
+          /* Background only on the login page */
           .login-page::before {{
             content: "";
             position: fixed;
             inset: 0;
-            {"background-image:url('data:image/png;base64," + b64 + "');" if b64 else ""}
-            background-color:#1b60aa;  /* fallback */
+            {"background-image:url('data:image/png;base64," + b64 + "');" if b64 else "background-color:#1b60aa;"}
             background-position:center center;
             background-size:cover;
             background-repeat:no-repeat;
