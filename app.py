@@ -1,14 +1,7 @@
-# app.py
-import base64
-import hashlib
-import datetime as dt
-import sqlite3
-import mimetypes
-import secrets
-import zipfile
+
+import base64, hashlib, datetime as dt, sqlite3, mimetypes, secrets, zipfile
 from pathlib import Path
 from io import BytesIO
-
 import pandas as pd
 import streamlit as st
 
@@ -38,7 +31,7 @@ def load_css():
     .block-container { padding-top: 0.75rem; padding-bottom: 3rem; }
     .subtle { color: #ffffff; } /* sidebar subtle text to white */
 
-    /* App background (post-login) */
+    /* App background */
     body { background: #f6f8fb; }
 
     /* Header: blue with white text */
@@ -1076,107 +1069,33 @@ def page_manage_users(con, user):
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ------------------------------ Login (branded background + right card) ------------------------------
+# ------------------------------ Login (classic minimal) ------------------------------
 
-def style_login(bg_path: str = "assets/login-bg.png"):
-    """Login-only styles: full-page background image + right-aligned login card."""
-    b64 = ""
-    try:
-        p = Path(bg_path)
-        if p.exists():
-            b64 = base64.b64encode(p.read_bytes()).decode("utf-8")
-    except Exception:
-        pass
-
-    st.markdown(
-        f"""
-        <style>
-          /* Hide Streamlit chrome on login */
-          header[data-testid="stHeader"] {{ display:none !important; }}
-          #MainMenu, .stDeployButton, footer {{ visibility:hidden; }}
-
-          /* A full-viewport wrapper so we can render the background behind it */
-          .login-page {{
-            min-height: 100vh;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            position: relative;
-            z-index: 1;
-          }}
-
-          /* Background only on the login page */
-          .login-page::before {{
-            content: "";
-            position: fixed;
-            inset: 0;
-            {"background-image:url('data:image/png;base64," + b64 + "');" if b64 else "background-color:#1b60aa;"}
-            background-position:center center;
-            background-size:cover;
-            background-repeat:no-repeat;
-            background-attachment:fixed;
-            z-index:-1;
-          }}
-
-          /* The white login card on the right */
-          .login-card {{
-            margin-left: auto;           /* pushes it to the right */
-            margin-right: 3rem;
-            width: min(420px, 92%);
-            background: #ffffff;
-            border-radius: 16px;
-            padding: 24px 24px 28px;
-            box-shadow: 0 20px 40px rgba(0,0,0,.18);
-            border: 1px solid rgba(0,0,0,.04);
-          }}
-
-          /* Make the primary button blue on login */
-          .login-card .stButton > button {{
-            background: var(--primary-blue) !important;
-            border-color: var(--primary-blue) !important;
-            width: 100%;
-          }}
-
-          /* Title in blue, like the reference */
-          .login-card h1 {{
-            color: var(--primary-blue) !important;
-            margin-top: 0;
-            margin-bottom: .5rem;
-          }}
-
-          /* Tighten label spacing a bit inside the card */
-          .login-card label p {{
-            margin-bottom: .25rem;
-          }}
-
-          /* Keep hints hidden on login */
-          [data-testid="stWidgetInstructions"], [data-testid="InputInstructions"] {{
-            display:none !important;
-          }}
-
-          /* Mobile: center the card with some padding */
-          @media (max-width: 900px) {{
-            .login-card {{ margin: 2rem auto; }}
-            .login-page {{ padding: 1rem; }}
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+def style_login():
+    st.markdown(f"""
+    <style>
+      header[data-testid="stHeader"] {{ display:none !important; }}
+      #MainMenu, .stDeployButton, footer {{ visibility:hidden; }}
+      /* Login: blue primary button, blue checkbox, blue title */
+      .stButton > button {{ background: var(--primary-blue) !important; border-color: var(--primary-blue) !important; }}
+      .stCheckbox [data-baseweb="checkbox"] > div {{ border-color: var(--primary-blue) !important; }}
+      .stCheckbox [data-baseweb="checkbox"] svg {{ color: var(--primary-blue) !important; }}
+      h1 {{ color: var(--primary-blue) !important; }}
+      /* Hide press enter hints here too */
+      [data-testid="stWidgetInstructions"], [data-testid="InputInstructions"] {{ display:none !important; }}
+    </style>
+    """, unsafe_allow_html=True)
 
 def login_view():
-    style_login()  # uses assets/login-bg.png by default
-
-    # Right-aligned, white card on top of the background
-    st.markdown('<div class="login-page"><div class="login-card">', unsafe_allow_html=True)
-    with st.form("login_form", clear_on_submit=False):
-        st.title(APP_TITLE)
-        u = st.text_input("Email", key="login_email")
-        p = st.text_input("Password", type="password", key="login_pwd")
-        keep = st.checkbox("Keep me signed in on this device", value=True, key="login_keep")
-        submitted = st.form_submit_button("Login", use_container_width=True, type="primary", key="login_submit")
-    st.markdown('</div></div>', unsafe_allow_html=True)
-
+    style_login()
+    col_l, col_c, col_r = st.columns([1, 1, 1])
+    with col_c:
+        with st.form("login_form", clear_on_submit=False):
+            st.title(APP_TITLE)
+            u = st.text_input("Email", key="login_email")
+            p = st.text_input("Password", type="password", key="login_pwd")
+            keep = st.checkbox("Keep me signed in on this device", value=True, key="login_keep")
+            submitted = st.form_submit_button("Login", use_container_width=True, type="primary", key="login_submit")
     return submitted, u, p, keep
 
 # ------------------------------ Serve mode ------------------------------
